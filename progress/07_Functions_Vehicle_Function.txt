@@ -162,7 +162,7 @@ compute_downhill_cap(step, const): 내리막 세그먼트 진입 전 목표
   이상 시 확인 지점.
 - 속도 정수(int) 출력: 내부 계산은 float 유지, results.append()
   시점에만 반올림하기로 결정됐으나 **아직 코드 미반영**
-  (progress/23 백로그 참고).
+  (progress/27 백로그 참고).
 - **control_stop_handler()의 리팩터링 전후 A/B 비교 검증 완료**
   (progress/19, 도달거리 차이 0.1% 확인).
 - **light_arrive() 단위 불일치 버그** (미터 vs km) - progress/20
@@ -171,12 +171,31 @@ compute_downhill_cap(step, const): 내리막 세그먼트 진입 전 목표
   아직 직접 확인 안 함 - 방어 코드(dt<=0이면 a=0)로 크래시는 막았으나
   근본 데이터 이슈인지는 미확인.
 
+[ run_simulation() 종료 사유 추적 (2026-08-02) ]
+**리턴 시그니처 변경**: `return pd.DataFrame(results)` 단독에서
+`return pd.DataFrame(results), termination_reason`로 변경. 모든
+호출부(scripts/main.py 2곳, app.py 1곳)도 튜플 언패킹으로 수정
+완료. termination_reason은 루프 시작 전 "완주"로 초기화, 아래 3개
+break 지점에서 각각 덮어씀:
+- calender_handler()의 "Stop"(27일 초과) - 이제 reason 키로
+  "27일 제한기간 초과" 포함해서 반환.
+- control_stop_handler()의 "Fail"(CS 마감시각 초과 / 구간평균속도
+  미달) - 이제 reason 키로 f"{CS이름} 마감시각 초과" 또는
+  f"{CS이름} 구간 평균속도(60km/h) 미달" 포함해서 반환(어느 CS인지
+  까지 구분됨).
+- soc < simpara.soc_hard_stop - "배터리 SOC 하한 도달" 직접 대입.
+목적: app.py에서 AI API 없이 규칙 기반으로 "왜 실패했는지" 분석
+패널을 보여주기 위함(상세는 progress/26). 예외적으로 이번엔 사용자가
+"둘 다(스펙+구현) 진행하도록 해"라고 명시적으로 요청해서 Claude가
+직접 작성.
+
 [ 상태 ]
 run_simulation() 함수분리 6/6 완료 + A/B 검증 완료(progress/19).
 simpara.a 동적화 + LV2 momentum 결합 완료(progress/08 참고). 실제
 2025 BWSC 속도제한/신호등 데이터 반영 완료(progress/20, 신호등은
 단위버그로 미작동). 오르막/내리막 지형 세그먼트 전처리(read_path())
 완료, 실제 활용 로직(compute_downhill_cap, CS 코스팅/제동)은 설계만
-되고 코드는 없음(progress/22, 다음 세션 최우선 작업). 최신 백로그는
-progress/23 참고.
+되고 코드는 없음(progress/22, 다음 세션 최우선 작업). 종료 사유
+추적(termination_reason) 반영 완료(progress/26). 최신 백로그는
+progress/27 참고.
 ================================================================

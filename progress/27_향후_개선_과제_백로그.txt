@@ -1,19 +1,24 @@
 ================================================================
-향후 개선 과제 백로그 (2026-07-20 기준 최신, progress/18 대체)
+향후 개선 과제 백로그 (2026-08-02 기준 최신, progress/23 대체)
 ================================================================
 [ 이 파일의 번호는 항상 progress/ 폴더의 가장 끝 번호로 유지할 것 -
   완료된 항목은 여기서 지우고 progress/NN_주제.txt로 번호를 이어
   붙여 별도 파일로 옮긴다. 새 항목이 생겨 이 파일을 다시 갱신할
   때는 이 파일 자체를 다음 번호로 새로 저장하고 이전 버전(지금은
-  progress/18)은 삭제한다. ]
+  progress/23)은 삭제한다. ]
 
 [ 다른 컴퓨터/세션에서 이어서 시작할 때 여기부터 읽을 것 ]
 run_simulation() 함수 분리(6/6) + A/B 검증, simpara.a 동적화 + LV2
 momentum 결합, dist_vals 성능버그 수정, 실제 2025 BWSC 속도제한/
 신호등 데이터 반영, Optuna 날씨 섭동 CS구간 상관화, 오르막/내리막
-지형 세그먼트 전처리(read_path()) 전부 완료됨 (완료 이력:
-progress/13~17, 19, 20, 21). 코드 최신 상태 요약은 progress/07
+지형 세그먼트 전처리(read_path()), **GitHub 레포 생성 + Streamlit
+Cloud 배포, Supabase 로그인/닉네임/결과 저장·조회, 시뮬레이션 종료
+사유 추적 + 규칙 기반 결과 분석 패널** 전부 완료됨 (완료 이력:
+progress/13~17, 19~21, 24~26). 코드 최신 상태 요약은 progress/07
 (Vehicle_Function.py), progress/08(mpc_controller.py) 참고.
+프로젝트는 이제 GitHub(https://github.com/Dorolong/WSC_Project)에
+올라가 있고 Streamlit Cloud 배포 진행 중 - 로컬 작업 후 git push하면
+자동 재배포됨.
 
 **지금 이어서 할 일 1순위 - MPC 물리 building block 완성
 (설계 완료, 코드 없음, progress/22에 전체 스펙 정리돼 있음)**:
@@ -21,13 +26,15 @@ progress/13~17, 19, 20, 21). 코드 최신 상태 요약은 progress/07
    부분 근처): is_downhill 불리언 배열(read_path()가 이미 생성) ->
    np.diff+np.where+np.concatenate로 [시작거리, 끝거리, 대표경사각]
    3개 배열로 변환, 1회성 계산. **작성 중 미완성 상태로 세션
-   종료됨** (main.py에 change_idx = np.where()까지만 써져 있고
-   괄호 안 인자/이후 로직 미완성).
+   종료됨** (main.py 77번 줄에 change_idx = np.where()까지만 써져
+   있고 괄호 안 인자/이후 로직 미완성 - 완성된 참고 구현은 같은 파일
+   143~161번 줄 문자열 블록에 그대로 남아있음).
 2. compute_downhill_cap(step, const) (Vehicle_Function.py, 사용자
    직접 작성 예정): 위 배열로 세그먼트 진입 전 목표속도 상한 계산.
    물리식: a_coast=(F_aero+F_roll+F_slope)/mass, v_entry_max =
    sqrt(v_exit_cap² - 2·a_coast·L). mpc_speed()의 speed_limit 클립
-   자리에 v=min(v, downhill_v_cap) 추가.
+   자리에 v=min(v, downhill_v_cap) 추가. (참고 구현은 main.py
+   163~190번 줄 문자열 블록에 있음)
 3. CS 접근 코스팅/제동 (Vehicle_Function.py, mpc_controller.py,
    사용자 직접 작성 예정): coast_distance=v²/(2·a_coast) 트리거로
    가속 해제, 내리막(a_coast<=0)은 신규 상수 simpara.decel_active
@@ -67,6 +74,10 @@ progress/13~17, 19, 20, 21). 코드 최신 상태 요약은 progress/07
    끝나고 본 탐색 재실행할 때 같이 결정.
 4. (선택, 급하지 않음) mpc_speed()의 np.clip() 스칼라 호출을 순수
    파이썬 max()/min()으로 교체.
+5. (신규, 급하지 않음) termination_reason을 scripts/main.py의
+   objective() 스코어링에 활용할지 검토 - 현재는 df, _reason으로
+   받기만 하고 reason은 안 씀. 실격 유형별(SOC 부족 vs CS 마감초과
+   vs 구간속도미달)로 다른 페널티를 주면 탐색이 더 정교해질 수 있음.
 
 [ 참고 - 실제 MPC 정의 대비 현재 모델의 한계 (분석, 액션 아이템 아님) ]
 없는 것: 명시적 예측 모델 기반 수치 최적화(매 스텝 비용함수를
@@ -80,6 +91,17 @@ speed_limit 등 전부 사후 클리핑).
 재구성. 오르막은 배터리 I²R 손실(제곱 손실) 기반 비용항으로,
 energy_crit의 균등배분 가정도 지형 기반 1회성 예산 배분으로 재설계
 예정(둘 다 설계 논의만 완료, progress/22 참고).
+
+[ 참고 - 웹 배포/AI 분석 관련 결정 사항 ]
+- GitHub Pages 프론트 + Supabase 백엔드 아키텍처는 이 프로젝트(무거운
+  Python 연산이 핵심)엔 안 맞아 기각, Streamlit Cloud 단일 배포로 결정.
+- 결과 AI 분석(Claude API 연동)은 실제 현금 과금 + 공개 앱에서 방문자가
+  누를 때마다 앱 소유자 비용 발생 문제로 기각, 규칙 기반 분석
+  (progress/26)으로 대체 완료.
+- 앱 안에서 코드 수정 후 즉시 배포 반영하는 기능은 보안 위험(임의
+  코드 실행) + Streamlit Cloud 재배포 구조상 어차피 유지 안 됨으로
+  기각, GitHub 웹 에디터(github.dev) + 기존 git push 자동배포 파이프
+  라인 사용을 권장.
 
 [ 완료 이력 (이 백로그에서 빠진 완료 항목들의 위치) ]
 - progress/13: v_rate_limiting -> 댐퍼(EMA+tanh) 전환 (2026-07-18)
@@ -97,4 +119,10 @@ energy_crit의 균등배분 가정도 지형 기반 1회성 예산 배분으로 
 - progress/22: MPC 비용함수 전환 방향 논의 + 오르막/내리막 지형
   세그먼트 전처리 (2026-07-20, 세션 재개 후) - **진행중**,
   read_path()만 완료, 나머지는 위 "1순위" 참고
+- progress/24: GitHub 레포 생성 + Streamlit Cloud 배포 준비
+  (2026-08-02)
+- progress/25: Supabase 로그인 + 시뮬레이션 기록 저장/조회
+  (2026-08-02)
+- progress/26: 시뮬레이션 종료 사유 추적 + 규칙 기반 결과 분석 패널
+  (2026-08-02)
 ================================================================

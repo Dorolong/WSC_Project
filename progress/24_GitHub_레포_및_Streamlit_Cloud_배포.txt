@@ -1,0 +1,62 @@
+================================================================
+[완료] GitHub 레포 생성 + Streamlit Cloud 배포
+================================================================
+완료일: 2026-08-02
+
+[ 배경 ]
+그동안 git 없이 outputs/trial_N_YYMMDD/ 수동 아카이빙으로 버전관리를
+대체해왔으나, 포트폴리오 공개 + 실제 웹 배포를 위해 GitHub 레포로
+전환. 배포 아키텍처는 "GitHub Pages 프론트 + Supabase 백엔드"를
+먼저 검토했으나, 이 프로젝트 핵심 가치(run_simulation()/Optuna 같은
+무거운 Python 연산)가 GitHub Pages(정적 파일만)나 Supabase Edge
+Function(실행시간 제한)엔 안 맞아 기각 - 기존 Streamlit 구조를
+그대로 Streamlit Community Cloud에 배포하는 쪽으로 결정(프론트+백
+둘 다 Streamlit 하나가 담당, 별도 API 서버 불필요).
+
+[ git 저장소 초기화 ]
+- .gitignore 작성: .venv/, __pycache__/, 개인 문서(보고서/), Optuna
+  결과물/이력(outputs/Optuna_result.csv, sim_result.*,
+  optuna_study_test.db, trial_*/), 지형 분석 이미지(terrain_*.png)
+  제외 - SETUP.md에 명시된 "앱 실행 필수 파일"(env_data.csv,
+  optuna_study.db, TRACK.csv, assets/, components/)만 포함.
+- 사용자 확인 후 보고서/WSC 주행 효율 예측.docx(바이너리, 내용 미확인)
+  는 제외 결정, 대용량 결과물도 "필수 파일만 커밋" 결정.
+- git 로컬 user.name/user.email 설정(레포 전용, --global 아님).
+- 최초 커밋 66개 파일, 186,908줄.
+
+[ GitHub push ]
+gh CLI 미설치 상태라 github.com에서 수동으로 빈 Public 레포 생성
+(https://github.com/Dorolong/WSC_Project) 후 remote 추가, push.
+중간에 사용자가 GitHub 웹 UI로 .devcontainer/devcontainer.json을
+먼저 추가해둬서 push가 한 번 거부됨(non-fast-forward) - fetch 후
+merge(충돌 없음, 별개 파일)하고 재push로 해결.
+
+[ Streamlit Cloud 배포 준비 ]
+- .python-version 파일 추가("3.12") - Streamlit Cloud가 이 파일로
+  Python 버전을 인식(SETUP.md의 3.12 요구사항과 일치시킴).
+- app.py의 파일 경로가 전부 상대경로/os.path.join이라 Linux 서버
+  에서도 문제없음을 사전 확인(하드코딩된 Windows 경로 없음).
+- 무료 티어 리소스 제한(1 CPU 안팎) 감안, 배포된 앱에서는 Optuna
+  탐색 자체가 아니라 best_params 기반 단발 시뮬레이션 실행 용도로만
+  쓰기로 함(Optuna 탐색은 계속 로컬에서).
+
+[ 아키텍처 정리 (사용자 질문에 대한 답변, 코드 변경 아님) ]
+- Streamlit이 프론트+백엔드를 모두 담당하는 구조임을 확인(React 같은
+  별도 프론트엔드 없음).
+- "서버 구축까지 간다면"이라는 질문에는, 동시접속자가 많거나 완전
+  커스텀 UI가 필요해지는 시점 전까지는 Streamlit로 충분하다고 판단
+  (한 명이 가끔 무거운 연산을 돌리는 패턴엔 Streamlit이 적합).
+- "앱 안에서 코드 수정 -> 바로 적용" 기능은 보안상(임의 코드 실행
+  리스크) 권장 안 함, 관리자 암호로 막아도 근본 위험 안 없어짐 -
+  대신 GitHub 웹 에디터(github.dev)로 어디서든 수정 후 커밋하면
+  Streamlit Cloud가 자동 재배포하는 기존 파이프라인으로 충분함을
+  설명.
+
+[ 상태 ]
+GitHub 레포 및 로컬-원격 동기화 완료. Streamlit Cloud 배포는 사용자가
+직접 대시보드에서 진행(제가 클릭할 수 없는 부분) - 이후 세션들에서
+계속 이 레포에 push -> 자동 재배포되는 흐름으로 이어짐.
+
+[ 관련 파일 ]
+.gitignore, .python-version, (신규) .git/
+================================================================

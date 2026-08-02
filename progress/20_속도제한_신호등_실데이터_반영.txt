@@ -81,7 +81,7 @@ control_stops가 미터 단위라 정상 작동, compute_speed_limit()는
 curr_dist_km = curr_dist/1000 변환을 거쳐서 정상 작동 - light_arrive()
 에만 이 변환이 빠짐. 발견 시점: 2026-07-20(문서화 직전 재검증
 중), 사용자 판단으로 지금은 고치지 않고 백로그로만 남김
-(progress/23 참고). 고치는 법은 light_arrive() 안에서
+(progress/27 참고). 고치는 법은 light_arrive() 안에서
 curr_dist_km = curr_dist/1000 변환 후 비교하거나, 호출부에서
 step["curr_dist"]/1000을 넘기면 됨.
 

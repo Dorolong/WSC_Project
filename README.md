@@ -21,13 +21,29 @@ MPC(+ 추후 강화학습) 프로젝트.
 | 6 | 강화학습 실험 — `rl/` | 미착수 |
 | 7 | 실측 데이터 교체 | 미착수 |
 
-## 현재 상태 (2026-07-20)
+## 현재 상태 (2026-08-02)
+- **GitHub 레포 생성 + Streamlit Cloud 배포**: 프로젝트를
+  [github.com/Dorolong/WSC_Project](https://github.com/Dorolong/WSC_Project)
+  (Public)에 올리고 Streamlit Community Cloud에 배포. GitHub Pages
+  프론트 + Supabase 백엔드 아키텍처는 무거운 Python 연산이 핵심인 이
+  프로젝트엔 안 맞아 기각, Streamlit 단일 배포로 결정 (`progress/24`).
+- **Supabase 로그인 + 시뮬레이션 기록 저장/조회**: 회원가입(닉네임
+  포함)/로그인/닉네임 수정, 로그인해야 시뮬레이션 실행 가능, 결과를
+  "결과 서버에 저장" 버튼으로 명시적 저장, 사이드바에서 최근 기록
+  조회. Supabase 클라이언트는 세션별로 격리(멀티유저 인증 세션 섞임
+  방지) (`progress/25`).
+- **시뮬레이션 종료 사유 추적 + 규칙 기반 결과 분석**: AI API 연동은
+  실제 과금(공개 앱이라 방문자가 누를 때마다 앱 소유자 비용 발생)
+  문제로 기각하고, 이미 코드에 있던 실격/중단 사유(SOC 하한, CS
+  마감초과, 구간평균속도 미달, 27일초과)를 `run_simulation()`이
+  `(df, termination_reason)`으로 반환하도록 수정 후 케이스별 분기
+  메시지 표시 (`progress/26`).
 - **실제 2025 BWSC 속도제한/신호등 데이터 반영**: 공식 루트 규정집
   (Route Notes) PDF에서 추출한 `Configs/speed_limits_2025.csv`(계단형
   속도제한)/`traffic_lights_2025.csv`(신호등 위치)를 `mpc_speed()`에
   연결(법정 속도제한 클립은 v_min 하한보다 반드시 뒤에 위치해야
   함). **알려진 버그**: 신호등 지연은 단위 불일치(미터 vs km)로
-  실제로는 미발동, `progress/20`/`23` 참고.
+  실제로는 미발동, `progress/20`/`27` 참고.
 - **Optuna 로버스트 탐색 날씨 섭동을 CS 구간 단위로 상관화**: 포인트별
   독립 노이즈 대신 CS 구간(leg)마다 공유되는 z값으로 흔들어, 공간적으로
   뭉쳐 움직이는 실제 날씨 패턴에 더 가깝게 개선 (`progress/21`).
@@ -78,7 +94,7 @@ MPC(+ 추후 강화학습) 프로젝트.
   트라이얼 병렬화 설정은 탐색 직전으로 계속 보류, 현재
   `scripts/main.py`가 임시 스모크테스트 설정(`n_trials=2`, 테스트용
   study_name/storage)으로 남아있어 본 탐색 전 원복 필요)
-- 자세한 진행 내역은 `progress/`(주제별 정리, 특히 `progress/23`이
+- 자세한 진행 내역은 `progress/`(주제별 정리, 특히 `progress/27`이
   다음 할 일 목록), `debug_logs/`(디버깅 과정) 참고
 
 ## 폴더 구조
@@ -160,7 +176,7 @@ LV8 자체의 재설계 배경은 `debug_logs/(2026-07-13)_LV8_시간예산_설�
 
 ## 할 일
 
-### 단기 (진행 중, 다음에 이어서 할 것 - 자세한 건 `progress/23` 참고)
+### 단기 (진행 중, 다음에 이어서 할 것 - 자세한 건 `progress/27` 참고)
 - [ ] 내리막 세그먼트 경계 배열 추출 (main.py/app.py, 작성 중
       미완성 상태로 세션 종료)
 - [ ] `compute_downhill_cap(step, const)` 구현 (설계 완료, 코드 없음)
@@ -178,6 +194,9 @@ LV8 자체의 재설계 배경은 `debug_logs/(2026-07-13)_LV8_시간예산_설�
       `storage="sqlite:///outputs/optuna_study.db"`로 원복 필요)
 
 ### 완료
+- [x] GitHub 레포 생성 + Streamlit Cloud 배포 (`progress/24`)
+- [x] Supabase 로그인 + 시뮬레이션 기록 저장/조회 + 닉네임 (`progress/25`)
+- [x] 시뮬레이션 종료 사유 추적 + 규칙 기반 결과 분석 패널 (`progress/26`)
 - [x] `run_simulation()` 함수 분리 (6/6 완료: `compute_lookahead()`/
       `compute_required_pace()`/`compute_motor_derating()`/
       `calender_handler()`/`control_stop_handler()`/
