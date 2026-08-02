@@ -352,6 +352,7 @@ def route_animator(duration_sec=None, final_lon=None, final_lat=None, key=None):
 if "last_df" not in st.session_state:
     st.session_state.last_df = None
     st.session_state.last_params = None
+    st.session_state.last_reason = None
     st.session_state.last_final_pos = None
     st.session_state.last_saved = False
 
@@ -388,7 +389,7 @@ if st.session_state.sim_running:
         else:
             eta_text.caption("Estimated Time Left: calculating...")
 
-    df = run_simulation(params, route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limits_dists, speed_limits_vals, progress_cb=update_progress)
+    df, reason = run_simulation(params, route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limits_dists, speed_limits_vals, progress_cb=update_progress)
     eta_text.empty()
     pct_text.empty()
     st.session_state.sim_running = False
@@ -404,6 +405,7 @@ if st.session_state.sim_running:
     # 이후 CSV/서버 저장 버튼 클릭으로 다시 rerun이 일어나도 결과 화면이 사라지지 않음
     st.session_state.last_df = df
     st.session_state.last_params = params
+    st.session_state.last_reason = reason
     st.session_state.last_final_pos = (_final_lon, _final_lat)
     st.session_state.last_saved = False
     st.rerun()
@@ -411,6 +413,7 @@ if st.session_state.sim_running:
 if st.session_state.last_df is not None:
     df = st.session_state.last_df
     params = st.session_state.last_params
+    reason = st.session_state.last_reason
     _final_lon, _final_lat = st.session_state.last_final_pos
 
     st.subheader("경로 진행 상황")
@@ -432,6 +435,37 @@ if st.session_state.last_df is not None:
         col6.success("완주 성공")
     elif df['dist'].max() < 3038000:
         col6.error("완주 실패")
+
+    # 결과 분석 (규칙 기반 - 종료 사유별 분기)
+    st.subheader("결과 분석")
+    if reason == "완주":
+        soc_margin = df["soc"].min() - simpara.soc_hard_stop
+        if soc_margin < 0.05:
+            st.warning(
+                f"완주는 했지만 최저 SOC({df['soc'].min()*100:.1f}%)가 하한"
+                f"({simpara.soc_hard_stop*100:.0f}%)에 근접했습니다. 여유가 적은 편이라, "
+                f"날씨가 조금만 나빴어도 실패했을 수 있습니다."
+            )
+        else:
+            st.success(f"여유 있게 완주했습니다 (최저 SOC {df['soc'].min()*100:.1f}%).")
+    elif "SOC" in reason:
+        st.error(
+            f"완주 실패: {reason}. 배터리 소비가 발전량 대비 과했을 가능성이 큽니다 — "
+            f"energy_v/soc_cutoff를 더 보수적으로 조정하거나 전반적으로 속도를 낮춰보세요."
+        )
+    elif "마감시각" in reason:
+        st.error(
+            f"완주 실패: {reason}. 전체 진행 페이스가 요구 마감 대비 느렸습니다 — "
+            f"margin_total/margin_next_cs 관련 파라미터를 확인해보세요."
+        )
+    elif "구간 평균속도" in reason:
+        st.error(
+            f"완주 실패: {reason}. 직전 CS 구간에서 저속 주행 구간이 길었을 수 있습니다."
+        )
+    elif "제한기간" in reason:
+        st.error(f"완주 실패: {reason}. 27일 안에 전체 구간을 주행하지 못했습니다.")
+    else:
+        st.error(f"완주 실패: {reason}")
 
     # 요약 지표 - 3
     col7, col8 = st.columns(2)

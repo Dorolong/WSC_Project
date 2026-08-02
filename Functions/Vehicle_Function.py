@@ -332,7 +332,7 @@ def calender_handler(Accum_s):
 
     # 27일 이후 데이터 처리
     if(27 < DY):
-        return {"Action": "Stop"}
+        return {"Action": "Stop", "reason": "27일 제한기간 초과"}
     
     return {"Action": "Go", "Accum_s": Accum_s, "DY": DY, "HR": HR, "total_s": total_s}
 
@@ -349,13 +349,13 @@ def control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, 
 
     # 컨트롤 스탑 마감 체크: 마감시각 넘겨서 도착하면 실격
     if total_s > race.CS_close_hour[cs_hit] * 3600:
-        return {"Action": "Fail"}
-    
+        return {"Action": "Fail", "reason": f"{race.Control_Stop_2025[cs_hit]} 마감시각 초과"}
+
     # 구간(직전 CS ~ 지금 CS) 평균속도 실격 체크 (정차 시간 제외, 순수 주행 기준)
     leg_dist_goto = (step["curr_dist"] - last_cs_dist) / 1000
     leg_time_hr = (drive_time_s - last_cs_time) / 3600
     if leg_time_hr > 0 and (leg_dist_goto / leg_time_hr) < race.min_leg_avg_speed:
-        return {"Action": "Fail"}
+        return {"Action": "Fail", "reason": f"{race.Control_Stop_2025[cs_hit]} 구간 평균속도({race.min_leg_avg_speed:.0f}km/h) 미달"}
 
     Accum_s, soc = cs_stop_simulation(soc, Accum_s, nearest_diff, env_data)
     total_s = 8 * 3600 + Accum_s
@@ -442,7 +442,8 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
     drive_time_s        = 0.0            # 순수 주행시간 누적 (야간 점프 미포함, 구간 평균속도 계산용)
     last_cs_dist        = 0.0            # 구간 평균속도 계산용 (직전 CS 위치)
     last_cs_time        = 0.0            # 구간 평균속도 계산용 (직전 CS 통과 시점의 drive_time_s)
-        
+    termination_reason  = "완주"          # 루프가 break 없이 끝까지 돌면 완주로 간주, break 지점마다 덮어씀
+
     # route 컬럼을 numpy 배열로 미리 추출 (매 스텝 route.iloc[] 생성 오버헤드 제거)
     route_dist          = route["dist"]
     route_lat           = route["lat"]
@@ -530,6 +531,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
 
         calender_result = calender_handler(Accum_s)
         if calender_result["Action"] == "Stop":
+            termination_reason = calender_result.get("reason", "기간 초과")
             break
         
         Accum_s = calender_result["Accum_s"]
@@ -543,6 +545,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
 
         cs_stop_result = control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data)
         if cs_stop_result["Action"] == "Fail":
+            termination_reason = cs_stop_result.get("reason", "컨트롤스탑 실격")
             break
 
         if cs_stop_result["Action"] == "Stop":
@@ -576,6 +579,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
 
         # SOC 떨어지면 그대로 종료
         if soc < simpara.soc_hard_stop:
+            termination_reason = "배터리 SOC 하한 도달"
             break
 
         # 일사량 업데이트
@@ -603,4 +607,4 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
             "slope":    step["curr_slope"],
         })
 
-    return pd.DataFrame(results)
+    return pd.DataFrame(results), termination_reason
