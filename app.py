@@ -386,20 +386,21 @@ with st.sidebar:
                             .tz_convert("Asia/Seoul")
                             .strftime("%y.%m.%d %H:%M")
                         )
-                        col_info, col_load = st.columns([4, 1])
-                        with col_info:
-                            st.caption(
-                                f"{created} · 완주율 {row['completion_ratio']*100:.1f}% · "
-                                f"평균 {row['avg_speed_kmh']:.1f}km/h · 최저SOC {row['final_soc']*100:.1f}%"
-                            )
-                        with col_load:
-                            if st.button("불러오기", key=f"load_run_{row['id']}"):
-                                if row.get("vehicle_cfg"):
-                                    st.session_state.cfg = cfg_from_jsonable(row["vehicle_cfg"])
-                                    st.success("이 기록의 차량 제원 설정을 불러왔어요.")
-                                else:
-                                    st.info("이 기록엔 저장된 차량 제원 설정이 없어요(예전 기록).")
-                                st.rerun()
+                        # 사이드바 폭이 좁아 컬럼으로 나누면 버튼 텍스트가
+                        # 세로로 줄바꿈됨(한글 4글자 기준) - 캡션/버튼을
+                        # 세로로 쌓아서 전체 폭을 다 쓰도록 함
+                        st.caption(
+                            f"{created} · 완주율 {row['completion_ratio']*100:.1f}% · "
+                            f"평균 {row['avg_speed_kmh']:.1f}km/h · 최저SOC {row['final_soc']*100:.1f}%"
+                        )
+                        if st.button("이 설정 불러오기", key=f"load_run_{row['id']}", use_container_width=True):
+                            if row.get("vehicle_cfg"):
+                                st.session_state.cfg = cfg_from_jsonable(row["vehicle_cfg"])
+                                st.success("이 기록의 차량 제원 설정을 불러왔어요.")
+                            else:
+                                st.info("이 기록엔 저장된 차량 제원 설정이 없어요(예전 기록).")
+                            st.rerun()
+                        st.divider()
                 else:
                     st.caption("아직 기록이 없습니다.")
             except Exception as e:
