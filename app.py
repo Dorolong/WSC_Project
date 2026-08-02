@@ -235,16 +235,25 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"로그인 실패: {e}")
         with tab_signup:
+            signup_nickname = st.text_input("닉네임", key="signup_nickname")
             signup_email = st.text_input("이메일", key="signup_email")
             signup_pw = st.text_input("비밀번호", type="password", key="signup_pw")
             if st.button("회원가입", key="signup_btn"):
-                try:
-                    supabase.auth.sign_up({"email": signup_email, "password": signup_pw})
-                    st.success("가입 완료. 이메일 인증 후 로그인해주세요.")
-                except Exception as e:
-                    st.error(f"가입 실패: {e}")
+                if not signup_nickname.strip():
+                    st.error("닉네임을 입력해주세요.")
+                else:
+                    try:
+                        supabase.auth.sign_up({
+                            "email": signup_email,
+                            "password": signup_pw,
+                            "options": {"data": {"nickname": signup_nickname.strip()}},
+                        })
+                        st.success("가입 완료. 이메일 인증 후 로그인해주세요.")
+                    except Exception as e:
+                        st.error(f"가입 실패: {e}")
     else:
-        st.write(f"**{st.session_state.user.email}**님 환영합니다")
+        _display_name = st.session_state.user.user_metadata.get("nickname") or st.session_state.user.email
+        st.write(f"**{_display_name}**님 반갑습니다!")
         if st.button("로그아웃", key="logout_btn"):
             supabase.auth.sign_out()
             st.session_state.user = None
