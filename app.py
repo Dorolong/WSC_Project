@@ -354,14 +354,23 @@ if st.session_state.user is not None and not st.session_state.user.user_metadata
     tutorial_dialog()
 
 # 페이지 제목 + 버전/릴리즈노트 + 차량 제원 설정 버튼 (Streamlit 기본 Stop 컨트롤이 뜨는 우측 상단 근처)
-title_col, version_col, btn_col = st.columns([5, 1.2, 1])
+# 참고: 이 위치가 Streamlit 앱 콘텐츠 영역에서 사용 가능한 가장 위쪽 자리.
+# 화면 우측 상단의 Share/GitHub/Manage app 등은 Streamlit Cloud가 앱
+# iframe 바깥에 그리는 플랫폼 UI라서, 앱 코드(Python)로는 그 툴바 안에
+# 버튼을 끼워넣거나 위치를 옮길 수 없음.
+title_col, version_col, btn_col = st.columns([5, 1.3, 1])
 with title_col:
     st.title("2027 WSC Drive Simulator")
 with version_col:
     st.write("")
-    st.caption(f"v{APP_VERSION}")
-    if st.button("릴리즈 노트", use_container_width=True):
-        release_notes_dialog()
+    st.write("")
+    v_col, note_col = st.columns([1, 1.7])
+    with v_col:
+        st.write("")
+        st.caption(f"v{APP_VERSION}")
+    with note_col:
+        if st.button("Release note", use_container_width=True):
+            release_notes_dialog()
 with btn_col:
     st.write("")
     st.write("")
