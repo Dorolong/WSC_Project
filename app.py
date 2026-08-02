@@ -15,10 +15,22 @@ import pandas as pd
 import numpy as np
 import optuna
 from plotly.subplots import make_subplots
+from supabase import create_client
 
 from Functions.Vehicle_Function import read_path, run_simulation
 from mpc.mpc_controller import mpc_default_params
 from Configs.Vehicle_Params import *
+
+# Supabase 클라이언트: st.session_state에 세션별로 저장(브라우저 세션마다 독립).
+# @st.cache_resource로 캐싱하면 서버 프로세스 전체에서 하나의 클라이언트를
+# 공유하게 되어, 로그인 시 클라이언트 내부에 저장되는 인증 세션이 다른
+# 사용자의 요청에도 그대로 섞여 들어가는(계정 뒤섞임) 위험이 있어 사용 안 함.
+if "supabase" not in st.session_state:
+    st.session_state.supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+supabase = st.session_state.supabase
+
+if "user" not in st.session_state:
+    st.session_state.user = None
 
 try:
     study = optuna.load_study(
@@ -207,8 +219,60 @@ def load_data():
 
 route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limits_dists, speed_limits_vals = load_data()
 
-# 사이드바 - MPC 파라미터 (읽기 전용, Optuna 최적값 그대로 사용)
+# 사이드바 - 계정 (로그인/회원가입, 로그인 시 시뮬레이션 기록 저장/조회)
 with st.sidebar:
+    st.header("계정")
+    if st.session_state.user is None:
+        tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
+        with tab_login:
+            login_email = st.text_input("이메일", key="login_email")
+            login_pw = st.text_input("비밀번호", type="password", key="login_pw")
+            if st.button("로그인", key="login_btn"):
+                try:
+                    res = supabase.auth.sign_in_with_password({"email": login_email, "password": login_pw})
+                    st.session_state.user = res.user
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"로그인 실패: {e}")
+        with tab_signup:
+            signup_email = st.text_input("이메일", key="signup_email")
+            signup_pw = st.text_input("비밀번호", type="password", key="signup_pw")
+            if st.button("회원가입", key="signup_btn"):
+                try:
+                    supabase.auth.sign_up({"email": signup_email, "password": signup_pw})
+                    st.success("가입 완료. 이메일 인증 후 로그인해주세요.")
+                except Exception as e:
+                    st.error(f"가입 실패: {e}")
+    else:
+        st.write(f"**{st.session_state.user.email}**님 환영합니다")
+        if st.button("로그아웃", key="logout_btn"):
+            supabase.auth.sign_out()
+            st.session_state.user = None
+            st.rerun()
+
+        with st.expander("내 시뮬레이션 기록"):
+            try:
+                records = (
+                    supabase.table("simulation_runs")
+                    .select("created_at, completion_ratio, avg_speed_kmh, final_soc, final_dist_m")
+                    .eq("user_id", st.session_state.user.id)
+                    .order("created_at", desc=True)
+                    .limit(20)
+                    .execute()
+                )
+                if records.data:
+                    hist_df = pd.DataFrame(records.data)
+                    hist_df["completion_ratio"] = (hist_df["completion_ratio"] * 100).round(1)
+                    hist_df.columns = ["일시", "완주율(%)", "평균속도(km/h)", "최저 SOC", "도달거리(m)"]
+                    st.dataframe(hist_df, hide_index=True, use_container_width=True)
+                else:
+                    st.caption("아직 기록이 없습니다.")
+            except Exception as e:
+                st.caption(f"기록 조회 실패: {e}")
+
+    st.divider()
+
+    # MPC 파라미터 (읽기 전용, Optuna 최적값 그대로 사용)
     st.header("MPC 파라미터 (Optuna 최적값)")
     st.dataframe(
         pd.DataFrame(best_params.items(), columns=["파라미터", "값"]),
@@ -286,6 +350,20 @@ if st.session_state.sim_running:
     eta_text.empty()
     pct_text.empty()
     st.session_state.sim_running = False
+
+    # 로그인 상태면 결과를 Supabase에 기록 (비로그인 시 저장 없이 결과만 표시)
+    if st.session_state.user is not None:
+        try:
+            supabase.table("simulation_runs").insert({
+                "user_id":          st.session_state.user.id,
+                "params":           params,
+                "completion_ratio": float(df["dist"].max() / race.total_distance),
+                "avg_speed_kmh":    float(df["v"].mean() * 3.6),
+                "final_soc":        float(df["soc"].min()),
+                "final_dist_m":     float(df["dist"].max()),
+            }).execute()
+        except Exception as e:
+            st.warning(f"기록 저장 실패: {e}")
 
     # 계산 완료 -> 실제 도달 지점까지 애니메이션 없이 즉시 반영 (완주 실패 시 그 지점에서 멈춤)
     route_dist_arr = route_np["dist"]

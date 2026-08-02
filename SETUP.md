@@ -52,6 +52,30 @@ VS Code에서 작업할 경우, 하단 상태바에서 Python 인터프리터를
 이 5개는 git에 커밋되어 있다면 clone/pull만으로 같이 옮겨지지만,
 `.gitignore`에 `outputs/`나 `*.db`, `*.png`가 걸려있는지 꼭 확인할 것.
 
+## Supabase 연동 (로그인 / 시뮬레이션 기록 저장)
+
+`app.py`가 로그인·회원가입(Supabase Auth)과 로그인한 사용자의 시뮬레이션
+결과 저장/조회(`simulation_runs` 테이블)를 지원한다. API 키는 보안상
+git에 커밋되지 않으므로(`.gitignore`에 `.streamlit/secrets.toml` 등록됨),
+**새 컴퓨터마다 직접 만들어야** 로그인 기능이 동작한다.
+
+1. 프로젝트 루트에 `.streamlit/secrets.toml` 파일을 만들고 아래 채워 넣기
+   (Supabase 대시보드 → Project Settings → API에서 URL/anon·publishable
+   key 확인):
+   ```toml
+   SUPABASE_URL = "https://<project-ref>.supabase.co"
+   SUPABASE_KEY = "<anon 또는 publishable key>"
+   ```
+   **anon/publishable 키만 쓸 것** - service_role 키는 절대 여기 넣지 말 것
+   (RLS를 우회하는 관리자 키라 클라이언트/앱 코드에 넣으면 안 됨).
+2. Supabase 프로젝트가 처음이라면, SQL Editor에서 `simulation_runs`
+   테이블 + RLS 정책을 먼저 생성해야 함 - 스키마는
+   `debug_logs/`에서 관련 항목 검색하거나 Claude에게 "Supabase
+   simulation_runs 스키마 다시 정리해줘" 요청.
+3. **Streamlit Cloud에 배포한 앱**은 로컬 `.streamlit/secrets.toml`이
+   안 올라가므로, Streamlit Cloud 대시보드의 앱 설정(Settings → Secrets)
+   에 같은 내용을 직접 입력해야 함.
+
 ## (선택) 호주 실루엣 이미지 재생성
 
 `assets/australia_silhouette.png`는 Natural Earth 공개 데이터로 1회성
