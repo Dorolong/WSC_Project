@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import base64
+import dataclasses
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
@@ -42,6 +43,42 @@ if "user" not in st.session_state:
 # 쓰면 서로 영향을 안 줌.
 if "cfg" not in st.session_state:
     st.session_state.cfg = build_default_cfg()
+
+def cfg_to_jsonable(cfg):
+    """cfg(physics/solar/... 묶음, numpy 배열 포함)를 Supabase(jsonb)에 저장 가능한 dict로 변환.
+    dataclasses.asdict()는 선언된 필드만 뽑아내서 __post_init__이 계산한 파생값
+    (HV_Energy, v_max 등)은 자동으로 빠짐 - 복원 시 __post_init__()을 다시 불러
+    재계산하면 되므로 저장할 필요 없음."""
+    def convert(o):
+        if isinstance(o, dict):
+            return {k: convert(v) for k, v in o.items()}
+        if isinstance(o, np.ndarray):
+            return o.tolist()
+        return o
+    return {
+        name: convert(dataclasses.asdict(getattr(cfg, name)))
+        for name in ("physics", "solar", "cell", "pack", "power", "drive", "race")
+    }
+
+def cfg_from_jsonable(data):
+    """cfg_to_jsonable()의 역변환. build_default_cfg()를 베이스로 저장된 값만
+    덮어써서, 나중에 필드가 추가돼도(예: 새 차량 제원 항목) 저장 당시엔 없던
+    필드는 기본값으로 안전하게 채워짐."""
+    cfg = build_default_cfg()
+    for name in ("physics", "solar", "power", "drive", "race"):
+        obj = getattr(cfg, name)
+        for k, v in data.get(name, {}).items():
+            if hasattr(obj, k):
+                setattr(obj, k, v)
+    for k, v in data.get("cell", {}).items():
+        if hasattr(cfg.cell, k):
+            setattr(cfg.cell, k, np.array(v) if k in ("ocv_soc", "ocv_V") else v)
+    for k in ("HV_S", "HV_P", "LV_S", "LV_P"):
+        if k in data.get("pack", {}):
+            setattr(cfg.pack, k, data["pack"][k])
+    cfg.pack.__post_init__()   # 파생값 재계산 (HV_Energy 등)
+    cfg.drive.__post_init__()  # 파생값 재계산 (v_max)
+    return cfg
 
 try:
     study = optuna.load_study(
@@ -133,7 +170,32 @@ def vehicle_settings_dialog():
         })
         edited = st.data_editor(ocv_df, num_rows="fixed")
 
-    if st.button("적용"):
+    col_apply, col_save, col_load = st.columns(3)
+    with col_apply:
+        apply_clicked = st.button("적용")
+    with col_save:
+        save_clicked = st.button("적용 후 계정에 저장", disabled=st.session_state.user is None)
+    with col_load:
+        load_clicked = st.button("마지막 저장값 불러오기", disabled=st.session_state.user is None)
+
+    if load_clicked:
+        try:
+            res = (
+                supabase.table("user_settings")
+                .select("vehicle_cfg")
+                .eq("user_id", st.session_state.user.id)
+                .execute()
+            )
+            if res.data:
+                st.session_state.cfg = cfg_from_jsonable(res.data[0]["vehicle_cfg"])
+                st.success("저장된 설정을 불러왔어요.")
+            else:
+                st.info("저장된 설정이 없어요. 먼저 '적용 후 계정에 저장'을 눌러주세요.")
+        except Exception as e:
+            st.error(f"불러오기 실패: {e}")
+        st.rerun()
+
+    if apply_clicked or save_clicked:
         physics.mass        = mass
         physics.Cd          = Cd
         physics.A_f         = Af
@@ -181,6 +243,16 @@ def vehicle_settings_dialog():
         race.soc_start_min  = soc_min
         race.cs_stop_max    = int(cs_max)
         race.cs_stop_min    = int(cs_min)
+
+        if save_clicked:
+            try:
+                supabase.table("user_settings").upsert({
+                    "user_id":     st.session_state.user.id,
+                    "vehicle_cfg": cfg_to_jsonable(cfg),
+                }).execute()
+                st.success("계정에 저장했어요.")
+            except Exception as e:
+                st.error(f"저장 실패: {e}")
 
         st.rerun()
 
@@ -301,22 +373,33 @@ with st.sidebar:
             try:
                 records = (
                     supabase.table("simulation_runs")
-                    .select("created_at, completion_ratio, avg_speed_kmh, final_soc, final_dist_m")
+                    .select("id, created_at, completion_ratio, avg_speed_kmh, final_soc, final_dist_m, vehicle_cfg")
                     .eq("user_id", st.session_state.user.id)
                     .order("created_at", desc=True)
                     .limit(20)
                     .execute()
                 )
                 if records.data:
-                    hist_df = pd.DataFrame(records.data)
-                    hist_df["created_at"] = (
-                        pd.to_datetime(hist_df["created_at"])
-                        .dt.tz_convert("Asia/Seoul")
-                        .dt.strftime("%y.%m.%d %H:%M")
-                    )
-                    hist_df["completion_ratio"] = (hist_df["completion_ratio"] * 100).round(1)
-                    hist_df.columns = ["일시", "완주율(%)", "평균속도(km/h)", "최저 SOC", "도달거리(m)"]
-                    st.dataframe(hist_df, hide_index=True, use_container_width=True)
+                    for row in records.data:
+                        created = (
+                            pd.to_datetime(row["created_at"])
+                            .tz_convert("Asia/Seoul")
+                            .strftime("%y.%m.%d %H:%M")
+                        )
+                        col_info, col_load = st.columns([4, 1])
+                        with col_info:
+                            st.caption(
+                                f"{created} · 완주율 {row['completion_ratio']*100:.1f}% · "
+                                f"평균 {row['avg_speed_kmh']:.1f}km/h · 최저SOC {row['final_soc']*100:.1f}%"
+                            )
+                        with col_load:
+                            if st.button("불러오기", key=f"load_run_{row['id']}"):
+                                if row.get("vehicle_cfg"):
+                                    st.session_state.cfg = cfg_from_jsonable(row["vehicle_cfg"])
+                                    st.success("이 기록의 차량 제원 설정을 불러왔어요.")
+                                else:
+                                    st.info("이 기록엔 저장된 차량 제원 설정이 없어요(예전 기록).")
+                                st.rerun()
                 else:
                     st.caption("아직 기록이 없습니다.")
             except Exception as e:
@@ -373,6 +456,7 @@ if "last_df" not in st.session_state:
     st.session_state.last_df = None
     st.session_state.last_params = None
     st.session_state.last_reason = None
+    st.session_state.last_vehicle_cfg = None
     st.session_state.last_final_pos = None
     st.session_state.last_saved = False
 
@@ -426,6 +510,7 @@ if st.session_state.sim_running:
     st.session_state.last_df = df
     st.session_state.last_params = params
     st.session_state.last_reason = reason
+    st.session_state.last_vehicle_cfg = cfg_to_jsonable(st.session_state.cfg)
     st.session_state.last_final_pos = (_final_lon, _final_lat)
     st.session_state.last_saved = False
     st.rerun()
@@ -556,6 +641,7 @@ if st.session_state.last_df is not None:
                     supabase.table("simulation_runs").insert({
                         "user_id":          st.session_state.user.id,
                         "params":           params,
+                        "vehicle_cfg":      st.session_state.last_vehicle_cfg,
                         "completion_ratio": float(df["dist"].max() / st.session_state.cfg.race.total_distance),
                         "avg_speed_kmh":    float(df["v"].mean() * 3.6),
                         "final_soc":        float(df["soc"].min()),
