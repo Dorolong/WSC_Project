@@ -364,19 +364,11 @@ with title_col:
 with version_col:
     st.write("")
     st.write("")
-    # gap="small" + use_container_width=False(기본값)로 캡션·버튼을
-    # 서로 붙여서 배치(버튼이 컬럼 폭만큼 안 늘어나 텍스트 크기에 맞게 작게 나옴).
-    # 뒤에 넓은 더미 컬럼(_spacer)을 하나 더 둬서 앞의 두 컬럼(v_col/note_col)이
-    # 차지하는 실제 폭 자체를 좁혀 캡션-버튼 간 여백을 줄임(Streamlit 컬럼은
-    # 내용에 맞춰 자동으로 좁아지지 않고 배정된 비율만큼 폭을 다 차지하므로,
-    # 남는 공간을 뒤쪽 더미 컬럼이 흡수하게 하는 방식).
-    v_col, note_col, _spacer = st.columns([1, 1.6, 3], gap="small")
-    with v_col:
-        st.write("")
-        st.caption(f"v{APP_VERSION}")
-    with note_col:
-        if st.button("Release note"):
-            release_notes_dialog()
+    # 캡션+버튼을 컬럼으로 나눠 붙이려던 방식은 컬럼 폭이 좁아지면 버튼
+    # 텍스트가 줄바꿈되는 문제가 있어서, 버전과 "Release note"를 아예
+    # 버튼 하나의 라벨로 합쳐 한 줄로 안정적으로 표시되게 함.
+    if st.button(f"v{APP_VERSION} (Release note)"):
+        release_notes_dialog()
 
 # 캐시
 @st.cache_data
@@ -574,19 +566,17 @@ if "last_df" not in st.session_state:
     st.session_state.last_saved = False
 
 # 실행 버튼 + 차량 제원 설정 버튼 (로그인해야 실행 가능)
+# 컬럼으로 나란히 배치하면 컬럼 간 최소 여백 때문에 버튼끼리 못 붙어서,
+# 세로로 쌓는 방식으로 변경 (시뮬레이션 실행이 원래 있던 자리 그대로,
+# 차량 제원 설정을 바로 아래에 붙임)
 if st.session_state.user is None:
     st.info("시뮬레이션을 실행하려면 로그인이 필요합니다.")
-# 뒤에 넓은 더미 컬럼(_spacer)을 둬서 두 버튼이 차지하는 실제 폭을 좁혀
-# 버튼 사이 여백을 줄임(위 버전/릴리즈노트 배치와 동일한 방식)
-run_col, settings_col, _spacer = st.columns([1.4, 1.6, 6], gap="small")
-with run_col:
-    if st.button("시뮬레이션 실행", type="primary",
-                 disabled=st.session_state.sim_running or st.session_state.user is None):
-        st.session_state.sim_running = True
-        st.rerun()
-with settings_col:
-    if st.button("차량 제원 설정", disabled=st.session_state.sim_running):
-        vehicle_settings_dialog()
+if st.button("시뮬레이션 실행", type="primary",
+             disabled=st.session_state.sim_running or st.session_state.user is None):
+    st.session_state.sim_running = True
+    st.rerun()
+if st.button("차량 제원 설정", disabled=st.session_state.sim_running):
+    vehicle_settings_dialog()
 
 if st.session_state.sim_running:
     params = {**best_params}
