@@ -103,6 +103,25 @@ if "sim_running" not in st.session_state:
 # 영향을 주는 버그였음, 위 st.session_state.cfg 초기화 주석 참고).
 @st.dialog("차량 제원 설정")
 def vehicle_settings_dialog():
+    # 계정에 저장된 마지막 설정 불러오기 - 편집 시작 전에 한 번 하는 동작이라
+    # 적용/저장 버튼들과 묶지 않고 상단에 별도로 분리
+    if st.button("☁ 마지막 저장값 불러오기", disabled=st.session_state.user is None, use_container_width=True):
+        try:
+            res = (
+                supabase.table("user_settings")
+                .select("vehicle_cfg")
+                .eq("user_id", st.session_state.user.id)
+                .execute()
+            )
+            if res.data:
+                st.session_state.cfg = cfg_from_jsonable(res.data[0]["vehicle_cfg"])
+                st.success("저장된 설정을 불러왔어요.")
+            else:
+                st.info("저장된 설정이 없어요. 값을 수정하고 아래 '계정에 저장'을 체크한 뒤 적용해주세요.")
+        except Exception as e:
+            st.error(f"불러오기 실패: {e}")
+        st.rerun()
+
     cfg = st.session_state.cfg
     physics, solar, cell, pack, power, drive, race = (
         cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race
@@ -170,32 +189,14 @@ def vehicle_settings_dialog():
         })
         edited = st.data_editor(ocv_df, num_rows="fixed")
 
-    col_apply, col_save, col_load = st.columns(3)
-    with col_apply:
-        apply_clicked = st.button("적용")
-    with col_save:
-        save_clicked = st.button("적용 후 계정에 저장", disabled=st.session_state.user is None)
-    with col_load:
-        load_clicked = st.button("마지막 저장값 불러오기", disabled=st.session_state.user is None)
+    save_to_account = st.checkbox(
+        "계정에도 저장", value=False, disabled=st.session_state.user is None,
+        help="체크하면 적용과 동시에 이 설정을 계정에 저장해서, 다음에 로그인했을 때 위 '마지막 저장값 불러오기'로 다시 불러올 수 있어요."
+        + ("" if st.session_state.user is not None else " (로그인 필요)")
+    )
+    apply_clicked = st.button("적용", use_container_width=True)
 
-    if load_clicked:
-        try:
-            res = (
-                supabase.table("user_settings")
-                .select("vehicle_cfg")
-                .eq("user_id", st.session_state.user.id)
-                .execute()
-            )
-            if res.data:
-                st.session_state.cfg = cfg_from_jsonable(res.data[0]["vehicle_cfg"])
-                st.success("저장된 설정을 불러왔어요.")
-            else:
-                st.info("저장된 설정이 없어요. 먼저 '적용 후 계정에 저장'을 눌러주세요.")
-        except Exception as e:
-            st.error(f"불러오기 실패: {e}")
-        st.rerun()
-
-    if apply_clicked or save_clicked:
+    if apply_clicked:
         physics.mass        = mass
         physics.Cd          = Cd
         physics.A_f         = Af
@@ -244,13 +245,13 @@ def vehicle_settings_dialog():
         race.cs_stop_max    = int(cs_max)
         race.cs_stop_min    = int(cs_min)
 
-        if save_clicked:
+        if save_to_account:
             try:
                 supabase.table("user_settings").upsert({
                     "user_id":     st.session_state.user.id,
                     "vehicle_cfg": cfg_to_jsonable(cfg),
                 }).execute()
-                st.success("계정에 저장했어요.")
+                st.success("적용하고 계정에도 저장했어요.")
             except Exception as e:
                 st.error(f"저장 실패: {e}")
 
