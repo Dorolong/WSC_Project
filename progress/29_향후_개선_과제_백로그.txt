@@ -1,21 +1,26 @@
 ================================================================
-향후 개선 과제 백로그 (2026-08-02 기준 최신, progress/23 대체)
+향후 개선 과제 백로그 (2026-08-02 기준 최신, progress/27 대체)
 ================================================================
 [ 이 파일의 번호는 항상 progress/ 폴더의 가장 끝 번호로 유지할 것 -
   완료된 항목은 여기서 지우고 progress/NN_주제.txt로 번호를 이어
   붙여 별도 파일로 옮긴다. 새 항목이 생겨 이 파일을 다시 갱신할
   때는 이 파일 자체를 다음 번호로 새로 저장하고 이전 버전(지금은
-  progress/23)은 삭제한다. ]
+  progress/27)은 삭제한다. ]
 
 [ 다른 컴퓨터/세션에서 이어서 시작할 때 여기부터 읽을 것 ]
 run_simulation() 함수 분리(6/6) + A/B 검증, simpara.a 동적화 + LV2
 momentum 결합, dist_vals 성능버그 수정, 실제 2025 BWSC 속도제한/
 신호등 데이터 반영, Optuna 날씨 섭동 CS구간 상관화, 오르막/내리막
-지형 세그먼트 전처리(read_path()), **GitHub 레포 생성 + Streamlit
+지형 세그먼트 전처리(read_path()), GitHub 레포 생성 + Streamlit
 Cloud 배포, Supabase 로그인/닉네임/결과 저장·조회, 시뮬레이션 종료
-사유 추적 + 규칙 기반 결과 분석 패널** 전부 완료됨 (완료 이력:
-progress/13~17, 19~21, 24~26). 코드 최신 상태 요약은 progress/07
-(Vehicle_Function.py), progress/08(mpc_controller.py) 참고.
+사유 추적 + 규칙 기반 결과 분석 패널, **차량 제원 설정이 전역
+상태로 새서 모든 사용자에게 반영되던 멀티유저 버그 수정
+(physics/solar/cell/pack/power/drive/race를 cfg로 세션별 격리)**
+전부 완료됨 (완료 이력: progress/13~17, 19~21, 24~26, 28). 코드
+최신 상태 요약은 progress/07(Vehicle_Function.py), progress/08
+(mpc_controller.py) 참고. **run_simulation()/mpc_speed() 시그니처가
+바뀌었음(cfg/const 인자 추가) - 이 함수들 직접 호출하는 코드를
+새로 작성할 때 최신 시그니처 확인 필수, progress/28 참고.**
 프로젝트는 이제 GitHub(https://github.com/Dorolong/WSC_Project)에
 올라가 있고 Streamlit Cloud 배포 진행 중 - 로컬 작업 후 git push하면
 자동 재배포됨.
@@ -34,7 +39,10 @@ progress/13~17, 19~21, 24~26). 코드 최신 상태 요약은 progress/07
    물리식: a_coast=(F_aero+F_roll+F_slope)/mass, v_entry_max =
    sqrt(v_exit_cap² - 2·a_coast·L). mpc_speed()의 speed_limit 클립
    자리에 v=min(v, downhill_v_cap) 추가. (참고 구현은 main.py
-   163~190번 줄 문자열 블록에 있음)
+   163~190번 줄 문자열 블록에 있음 - **단, progress/28에서 physics/
+   drive가 이제 전역이 아니라 const에서 꺼내 쓰는 구조로 바뀌었으니
+   참고 구현의 physics.Air_Density 등은 const["physics"]로,
+   drive.v_max는 const["drive"]로 고쳐서 옮길 것**)
 3. CS 접근 코스팅/제동 (Vehicle_Function.py, mpc_controller.py,
    사용자 직접 작성 예정): coast_distance=v²/(2·a_coast) 트리거로
    가속 해제, 내리막(a_coast<=0)은 신규 상수 simpara.decel_active
@@ -124,5 +132,8 @@ energy_crit의 균등배분 가정도 지형 기반 1회성 예산 배분으로 
 - progress/25: Supabase 로그인 + 시뮬레이션 기록 저장/조회
   (2026-08-02)
 - progress/26: 시뮬레이션 종료 사유 추적 + 규칙 기반 결과 분석 패널
+  (2026-08-02)
+- progress/28: 차량 제원 설정 전역상태 격리 버그수정 - cfg를 세션별로
+  독립시켜 한 사용자의 설정 변경이 다른 사용자에게 안 새게 함
   (2026-08-02)
 ================================================================

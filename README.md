@@ -22,6 +22,16 @@ MPC(+ 추후 강화학습) 프로젝트.
 | 7 | 실측 데이터 교체 | 미착수 |
 
 ## 현재 상태 (2026-08-02)
+- **[버그 수정] 차량 제원 설정이 전역 상태로 새서 모든 사용자에게
+  반영되던 멀티유저 버그**: "차량 제원 설정" 다이얼로그가
+  `Configs.Vehicle_Params`의 전역 싱글턴(physics/solar/cell/pack/
+  power/drive/race)을 직접 mutate하고 있어서, Streamlit Cloud처럼
+  여러 사용자가 서버 프로세스 하나를 공유하는 환경에서 한 사용자의
+  설정 변경이 다른 모든 사용자에게 그대로 반영되는 버그였음. `cfg`
+  (`build_default_cfg()`로 세션마다 독립 생성, `st.session_state.cfg`)
+  를 `run_simulation()`/`mpc_speed()`에 인자로 넘기는 구조로 변경해
+  완전 격리 - `run_simulation()`/`mpc_speed()` 시그니처가 바뀌었으니
+  직접 호출하는 코드 작성 시 주의 (`progress/28`).
 - **GitHub 레포 생성 + Streamlit Cloud 배포**: 프로젝트를
   [github.com/Dorolong/WSC_Project](https://github.com/Dorolong/WSC_Project)
   (Public)에 올리고 Streamlit Community Cloud에 배포. GitHub Pages
@@ -43,7 +53,7 @@ MPC(+ 추후 강화학습) 프로젝트.
   속도제한)/`traffic_lights_2025.csv`(신호등 위치)를 `mpc_speed()`에
   연결(법정 속도제한 클립은 v_min 하한보다 반드시 뒤에 위치해야
   함). **알려진 버그**: 신호등 지연은 단위 불일치(미터 vs km)로
-  실제로는 미발동, `progress/20`/`27` 참고.
+  실제로는 미발동, `progress/20`/`29` 참고.
 - **Optuna 로버스트 탐색 날씨 섭동을 CS 구간 단위로 상관화**: 포인트별
   독립 노이즈 대신 CS 구간(leg)마다 공유되는 z값으로 흔들어, 공간적으로
   뭉쳐 움직이는 실제 날씨 패턴에 더 가깝게 개선 (`progress/21`).
@@ -94,7 +104,7 @@ MPC(+ 추후 강화학습) 프로젝트.
   트라이얼 병렬화 설정은 탐색 직전으로 계속 보류, 현재
   `scripts/main.py`가 임시 스모크테스트 설정(`n_trials=2`, 테스트용
   study_name/storage)으로 남아있어 본 탐색 전 원복 필요)
-- 자세한 진행 내역은 `progress/`(주제별 정리, 특히 `progress/27`이
+- 자세한 진행 내역은 `progress/`(주제별 정리, 특히 `progress/29`이
   다음 할 일 목록), `debug_logs/`(디버깅 과정) 참고
 
 ## 폴더 구조
@@ -176,7 +186,7 @@ LV8 자체의 재설계 배경은 `debug_logs/(2026-07-13)_LV8_시간예산_설�
 
 ## 할 일
 
-### 단기 (진행 중, 다음에 이어서 할 것 - 자세한 건 `progress/27` 참고)
+### 단기 (진행 중, 다음에 이어서 할 것 - 자세한 건 `progress/29` 참고)
 - [ ] 내리막 세그먼트 경계 배열 추출 (main.py/app.py, 작성 중
       미완성 상태로 세션 종료)
 - [ ] `compute_downhill_cap(step, const)` 구현 (설계 완료, 코드 없음)
@@ -194,6 +204,7 @@ LV8 자체의 재설계 배경은 `debug_logs/(2026-07-13)_LV8_시간예산_설�
       `storage="sqlite:///outputs/optuna_study.db"`로 원복 필요)
 
 ### 완료
+- [x] 차량 제원 설정 전역상태 격리 버그수정 - `cfg` 세션별 격리 (`progress/28`)
 - [x] GitHub 레포 생성 + Streamlit Cloud 배포 (`progress/24`)
 - [x] Supabase 로그인 + 시뮬레이션 기록 저장/조회 + 닉네임 (`progress/25`)
 - [x] 시뮬레이션 종료 사유 추적 + 규칙 기반 결과 분석 패널 (`progress/26`)

@@ -1,0 +1,94 @@
+================================================================
+(2026-08-02) 차량 제원 설정이 전역 상태로 새던 멀티유저 버그
+================================================================
+
+[ 발견 ]
+사용자가 배포된 앱을 확인하다 직접 버그를 발견해서 보고: "누군가가
+MPC 최적 parameter를 건들면 모든 사용자에게 이게 global 수정이 돼.
+local으로 되는 게 아니라". 정확히는 사이드바의 MPC 파라미터 표(읽기
+전용)가 아니라, "차량 제원 설정" 다이얼로그(physics/solar/cell/pack/
+power/drive/race를 편집)가 문제였음.
+
+[ 원인 분석 ]
+`Configs/Vehicle_Params.py`의 physics/solar/cell/pack/power/drive/race
+가 모듈 로드 시 한 번만 생성되는 **전역 싱글턴**. app.py의
+`vehicle_settings_dialog()`가 "적용" 버튼에서
+`physics.mass = mass` 식으로 이 전역 객체를 **직접 mutate**함.
+Streamlit Cloud는 앱 하나당 서버 프로세스 하나를 여러 사용자가
+공유하는 구조라(`st.session_state`만 사용자별 격리, 모듈 전역
+변수는 프로세스 전체가 공유) - 이 mutate가 그 순간 서버에 붙어있는
+**모든 접속자**한테 반영됨. 아까 Supabase 클라이언트에서
+`@st.cache_resource` 대신 `st.session_state`를 써야 했던 것과 완전히
+같은 근본 원인의 재발.
+
+[ 대안 검토 및 기각 ]
+1) "적용 누른 사람 값으로 잠깐 바꿨다가 시뮬레이션 끝나면 원복" -
+   진짜 경쟁조건(race condition)이라 기각. Streamlit은 사용자별
+   스크립트 실행을 별도 OS 스레드로 돌리는데(각 세션마다 ScriptRunner
+   스레드), CPython의 GIL이 있어도 스레드 간 바이트코드 명령
+   단위로는 끼어들 수 있어서, 복구되기 전 찰나에 다른 사용자의
+   동시 실행이 그 값을 읽어버릴 위험이 있음. run_simulation()이
+   수만~수십만 스텝을 도는 동안(수십 초) 이 노출 창이 열려있는
+   구조라 리스크가 실질적임 - 순간적인 값 하나 읽는 정도가 아니라
+   "긴 시간 동안 잘못된 전역값 위에서 전체 시뮬레이션이 돎"이라는
+   심각한 문제.
+2) "지금 당장은 기능 비활성화(읽기 전용 전환)" - 안전하고 빠르지만
+   기능을 잃음. 1차로 제안했으나 사용자가 근본 해결로 진행 요청
+   ("2번으로 해결 가고... 각자의 로컬 변수로 들어가자는거지? 그걸로
+   하자").
+3) (검토만, 제안 안 함) contextvars/thread-local 프록시로 physics
+   같은 이름 자체가 스레드마다 다른 값을 가리키게 만드는 방법도
+   있었으나, 사용자가 이미 "로컬 변수로" 방향을 명확히 확인해서
+   더 단순한 파라미터 전달 방식으로 진행.
+
+[ 구현 방향 확정 및 범위 파악 ]
+사용자가 구현을 직접 위임("네가 좀 바꿔주라 내가 하면 또 너한테
+확인받고 그래야하니까. 바꾸고 백그라운드 테스트 한 번 돌려보고") -
+Vehicle_Function.py/mpc_controller.py를 Claude가 직접 수정하는
+예외 케이스로 진행.
+
+범위 파악: physics/solar/cell/pack/power/drive/race를 전역으로
+직접 참조하는 함수가 Vehicle_Function.py의 거의 전부(cal_drive_res,
+gen_solar, update_soc, cs_stop_time_cal, cs_stop_simulation,
+compute_required_pace, compute_motor_derating, compute_lookahead,
+control_stop_handler, compute_vehicle_energy, run_simulation)와
+mpc_controller.py의 mpc_speed()까지 퍼져있었음. (simpara는 다이얼로그가
+안 건드리는 값이라 전역 유지해도 안전 - 검토 후 제외.)
+
+**핵심 아이디어**: 이미 있던 `step`/`const` dict 전달 패턴을 그대로
+확장. "함수 맨 위에 `physics = const["physics"]`처럼 지역변수
+destructure 한 줄만 추가하면, 그 아래 본문에 이미 있던 `physics.X`
+참조들은 파이썬 스코프 규칙상 전부 그 지역변수를 가리키게 된다"는
+점을 활용 - 함수 본문 로직 자체는 거의 안 건드리고, 시그니처에
+`const` 추가 + destructure 한 줄만 추가하는 식으로 리팩터링 범위를
+최소화함(전체 로직을 다시 쓰는 것보다 훨씬 안전, 버그 유입 위험 적음).
+
+[ 구현 ]
+1. Configs/Vehicle_Params.py: `build_default_cfg()` 팩토리 추가 -
+   physics~race를 매번 새 인스턴스로 묶은 SimpleNamespace 반환
+   (pack.Cell = cell 참조 연결도 전역 버전과 동일하게 재현).
+2. Functions/Vehicle_Function.py: 9개 함수에 const 파라미터 추가(또는
+   이미 있던 compute_lookahead의 const에 race 추가), run_simulation()
+   은 신규 cfg 파라미터를 받아 지역변수로 풀고 const 딕셔너리에 담아
+   하위 함수 전부에 전달.
+3. mpc/mpc_controller.py: mpc_speed(step, params, const)로 변경.
+4. scripts/main.py: build_default_cfg()로 cfg 생성, 호출부 2곳 수정.
+5. app.py: `st.session_state.cfg`(세션 진입 시 1회 생성)를 다이얼로그가
+   읽고 쓰도록 전환, run_simulation() 호출부와 그래프의
+   race.Control_Stop_2025/race.total_distance 참조도 세션 cfg로 교체.
+
+[ 검증 ]
+스크래치패드 테스트: cfg_b.physics.mass를 250->500으로 바꿔도
+cfg_a.physics.mass와 모듈 전역 physics.mass 둘 다 그대로 250 유지
+(완전 격리 확인). mass가 다르니 실제 시뮬레이션 평균속도도 다르게
+나옴(76.6 vs 70.3 km/h) - cfg가 죽은 파라미터가 아니라 실제로 물리
+계산에 반영됨도 함께 확인. py_compile 5개 파일 전부 통과, 로컬
+Streamlit 서버 정상 기동 확인.
+
+[ 상태 ]
+수정/검증/커밋·푸시 완료.
+
+[ 관련 파일 ]
+Configs/Vehicle_Params.py, Functions/Vehicle_Function.py,
+mpc/mpc_controller.py, scripts/main.py, app.py
+================================================================
