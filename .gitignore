@@ -1,0 +1,19 @@
+# 가상환경 (컴퓨터별로 새로 만듦, SETUP.md 참고)
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# 개인 문서 (미공개)
+보고서/
+
+# Optuna 결과물/이력 - 앱 실행에 필수 아님, 재생성 가능 (SETUP.md 참고)
+outputs/Optuna_result.csv
+outputs/sim_result.csv
+outputs/sim_result.pdf
+outputs/optuna_study_test.db
+outputs/optuna_study.db-shm
+outputs/optuna_study.db-wal
+outputs/trial_*/
+outputs/terrain_*.png

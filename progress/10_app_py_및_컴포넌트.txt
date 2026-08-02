@@ -1,0 +1,56 @@
+================================================================
+파일별 현재 상태: app.py, components/route_animator/index.html
+================================================================
+
+[ app.py 전체 구조 (위에서 아래 순서) ]
+1. Optuna study 로드 시도 -> best_params (실패 시 mpc_default_params)
+2. st.set_page_config (wide 레이아웃)
+3. sim_running 세션 플래그 초기화
+4. vehicle_settings_dialog() 정의 (st.tabs 8개 카테고리)
+5. 제목 + "차량 제원 설정" 버튼 (같은 row, st.columns([6,1]))
+6. load_data() - route_np/env_dict/dist_vals/nearest_map/rad_max 캐시 생성
+7. 사이드바 - best_params 읽기 전용 표 (st.dataframe)
+8. route_animator 컴포넌트 선언 + 래퍼 함수 정의
+9. "시뮬레이션 실행" 버튼 -> sim_running=True -> rerun
+10. sim_running 블록:
+    - route_animator(duration_sec=6) 1회 호출 (루프 애니메이션 시작)
+    - time.sleep(1)
+    - pct_text/eta_text 자리 확보, progress_cb로 퍼센트+예상 남은시간 갱신
+    - run_simulation() 실행 (블로킹)
+    - route_animator(final_lon=..., final_lat=...) 1회 호출 (실제 결과로 스냅)
+    - 요약 지표 3세트 (평균/최고속도, 총거리 / 소비전력, 최저SOC, 완주여부
+      / 최대경사도, 평균발전량)
+    - SOC/전력/속도 3단 그래프 (Plotly, 날짜 경계선 + CS 지점 화살표 표시)
+    - CSV 다운로드 버튼
+
+[ 이번 세션에 없어진 것들 ]
+- MPC 파라미터 슬라이더 11개 (전부 제거, best_params 읽기 전용 표시로 대체)
+- "Optuna 최적값 불러오기" 버튼 (슬라이더 대상이 없어져서 같이 제거)
+- 진행률 st.progress() 바 (텍스트 퍼센트만 남김, 사용자 요청)
+- 페이지 전체 배경 이미지 (호주 실루엣은 지도 컴포넌트 안으로 이전)
+
+[ components/route_animator/index.html - 커스텀 컴포넌트 ]
+Node.js/React 빌드 없는 순수 HTML/JS 파일. declare_component(path=...)로
+정적 서빙됨.
+- postMessage 프로토콜 직접 구현 (componentReady, setFrameHeight 발신 /
+  streamlit:render 수신). 수신 메시지엔 isStreamlitMessage 플래그가
+  없다는 점이 버그 원인이었음 (수정 완료).
+- SVG 두 개의 <path> (배경 회색 전체경로 / 오렌지색 주행경로)로 구성,
+  별도 마커 요소는 없음 (좌표계 불일치 버그 이후 제거, 경로선 끝이
+  현재 위치를 표현).
+- runAnimation(): route_lon/lat이 오면 duration_sec 주기로 반복 재생
+  (requestAnimationFrame 기반), 경로 다 채우면 1초 setTimeout 홀드 후
+  재시작. final_lon/lat이 오면 애니메이션 없이 즉시 그 경로까지 표시.
+- 배경(호주 실루엣 이미지 + 전체 경로선)은 bgDrawn 플래그로 최초 1회만
+  그림.
+
+[ 알려진 특성/제약 (설계상 트레이드오프, 버그 아님) ]
+- 애니메이션은 실제 계산 진행률과 프레임 단위로 동기화되지 않음
+  (Streamlit 컴포넌트가 한 실행 내 반복 갱신을 지원 안 해서 나온 절충안).
+  실제 진행률은 별도 텍스트(퍼센트/ETA)로 확인.
+- 컴포넌트는 실행당 정확히 2번만 호출됨 (시작/완료). 그 사이엔 이미
+  로드된 iframe이 자체적으로 루프.
+
+[ 상태 ]
+완료, 브라우저 실사용 검증됨.
+================================================================

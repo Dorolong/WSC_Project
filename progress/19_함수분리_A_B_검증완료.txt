@@ -1,0 +1,54 @@
+================================================================
+[완료] run_simulation() 함수분리 리팩터링 A/B 비교 검증
+================================================================
+완료일: 2026-07-20 (세션 재개 후)
+
+[ 배경 ]
+progress/18(백로그) 최상단 우선순위 1번 - run_simulation() 6개 함수
+분리(progress/14) 이후 리팩터링 전후 결과가 동일한지 검증 안 된
+상태였음. 특히 control_stop_handler는 분리 도중 실제 크래시 버그가
+났던 영역(progress/15)이라 우선 검증 필요했음.
+
+[ 방법 ]
+git 저장소가 아니라 리팩터링 전 코드가 따로 안 남아있어서, 대화
+맥락에 남아있던 "6개 함수분리 시작 직전(compute_lookahead()만 분리된
+상태) + simpara.a 동적화/LV2 momentum 결합 이전" 시점의
+Vehicle_Function.py, mpc_controller.py 전체 코드를 스크래치패드에
+사본(Vehicle_Function_before.py, mpc_controller_before.py)으로
+복원. 호환성을 위해 2곳만 현재 Configs/Vehicle_Params.py에 맞춰
+조정(a = simpara.a -> simpara.prev_a로 개명 반영, prev_V_terminal
+초기값을 이미 합의된 수정판으로 통일 - 이건 리팩터링과 무관한 별개
+버그수정이라 노이즈 방지 차원).
+
+날씨는 랜덤 시드 없이 raw env_data.csv 그대로(결정론적 비교), 같은
+route/params로 OLD vs NEW run_simulation()을 나란히 실행.
+NEW 쪽엔 momentum_gain=0을 줘서, 함수분리 자체와는 별개로 의도적으로
+추가된 LV2 momentum 블렌딩 효과(신규 기능)만 중립화 - 순수 구조
+리팩터링의 영향만 보기 위함.
+
+[ 결과 ]
+    [OLD] rows=121486  max_dist_km=2429.51  final_soc=0.1000
+    [NEW] rows=121608  max_dist_km=2431.95  final_soc=0.0999
+    양쪽 다 27일 10시에 SOC 하한(soc_hard_stop=0.10)으로 정지 (동일)
+    200km 간격 체크포인트마다 SOC/속도 추이 패턴 일치(1000km 급상승,
+    1200km 하락 등 동일 패턴)
+    최종 도달거리 차이: 2.44km (0.1%)
+
+[ 해석 ]
+남은 미세한 차이(0.1%)는 momentum_gain=0으로도 못 지우는
+**의도된 차이** - simpara.a가 동적으로 계산되는 것 자체(F_acc 계산에
+실제 가감속 반영)는 momentum_gain과 무관하게 항상 작동해서, 기존
+고정 a=0 대비 매 스텝 에너지 계산이 미세하게 다르고 2400km에 걸쳐
+누적됨. 이건 백로그 3번(simpara.a 동적화)에서 의도적으로 도입한
+기능이라 정상. control_stop_handler/calender_handler 등 흐름제어
+로직도 디스퀄리파이 시점이 갈라지지 않고 동일하게 작동함을 확인.
+
+[ 결론 ]
+run_simulation() 함수분리(6개) 리팩터링은 기존 로직을 정확히
+보존했음을 확인. progress/18의 우선순위 1번 항목 완료 처리.
+
+[ 관련 파일 ]
+스크래치패드: Vehicle_Function_before.py, mpc_controller_before.py,
+ab_test_refactor.py (세션 종료 시 삭제되는 임시 디렉터리, 프로젝트
+파일 아님)
+================================================================

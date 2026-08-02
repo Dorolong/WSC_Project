@@ -1,0 +1,49 @@
+================================================================
+(2026-07-17) LV1/LV2/LV5 ramp 전환 및 update_soc 단위 버그
+================================================================
+
+[ 배경 ]
+"계수들이 단순하게 step으로 주어지는 게 있고 ramp로 주어지는 게
+있는데 일원화할 필요성이 있다"는 논의에서 시작. 원칙 정리: 물리적으로
+연속적인 반응이어야 하는 보정(SOC, 경사, 에너지예산, 미래추세)은
+ramp로, 의도적인 하드 안전컷(soc_cutoff, soc_hard_stop)만 계단형으로
+유지.
+
+[ LV1 - SOC 기반 속도 조절 ]
+기존: soc1 이상 -> V1, soc2 이상 -> V2, 그 이하 -> v_min (3단계 계단)
+변경:
+    frac = np.clip((soc - soc_ramp_low) / (soc_ramp_high - soc_ramp_low), 0, 1)
+    v = v_min + frac * (v_soc_high - v_min)
+soc_ramp_low~soc_ramp_high 구간을 v_min~v_soc_high로 선형 보간.
+LV1_V2 파라미터 제거(중간 계단이 사라지므로 불필요).
+
+[ LV2 - 경사각 보정 ]
+기존: slope_crit 임계값 넘으면 slope_V만큼 고정폭 가감 (계단형,
+파라미터 2개: slope_crit, slope_V)
+변경: v -= slope_k * slope (파라미터 1개, slope_k)
+사용자 확인 질문: "근데 이게 -가 들어오나? -가 알아서 들어오면
+오히려 이걸 잘못 짰네" -> slope 자체가 부호를 가진 값(오르막 +,
+내리막 -)이라 별도 부호 분기 없이 곱셈만으로 오르막 감속/내리막
+가속이 자연스럽게 나옴을 확인. 파라미터 2개 -> 1개로 순감소.
+
+[ LV5 - 풍향 보정 ]
+검토 결과 원래도 이미 if/elif 구조였지만 수식 자체는 연속/비례
+(min/max로 상한 대칭 클리핑)였음 -> 기능적 전환 불필요, 스타일만
+정리:
+    v -= np.clip(winddir_para * headwind, -winddir_para, winddir_para)
+사용자가 직접 반영, 확인 완료.
+
+[ update_soc() - 충전 상한 단위 버그 ]
+    I_max_chg = cell.Capa_batt * pack.HV_P / 1000   # mAh -> Ah 변환
+기존 코드에 /1000 변환이 누락되어 I_max_chg가 1000배 과대평가되고
+있었음(충전 상한이 사실상 무제한처럼 작동). 발견 후 수정.
+
+[ 상태 ]
+LV1/LV2/LV5 전부 정리 완료. update_soc 단위 버그 수정 완료. 이
+변경들이 반영된 상태로 trial_9(LV1 계단형 폐기 전 마지막) ->
+trial_10(LV1 램프 반영, 이후 야간리셋 버그로 재폐기) 순으로 진행됨.
+
+[ 관련 파일 ]
+mpc/mpc_controller.py (LV1/LV2/LV5)
+Functions/Vehicle_Function.py (update_soc)
+================================================================

@@ -1,0 +1,91 @@
+================================================================
+[완료] 2025 BWSC 실제 속도제한/신호등 데이터 반영
+================================================================
+완료일: 2026-07-20 (세션 재개 후)
+
+[ 배경 ]
+사용자가 공식 "2025-BWSC-Route-Notes-V1-FINAL-PRINT-Published-13072025.pdf"
+문서를 제공, Darwin~Adelaide 구간별 실제 법정 속도제한과 신호등 위치가
+루트 규정집에 있는지 확인 요청. PDF에서 직접 추출해 CSV 2개로
+정리하고, 4개 파일(Vehicle_Function.py/mpc_controller.py/
+scripts/main.py/app.py)에 배관 완료.
+
+[ 신규 데이터 파일 ]
+- Configs/speed_limits_2025.csv: distance_km, speed_limit_kmh
+  (~200행, 계단형/piecewise-constant). PDF 원문에 "도로공사 구간
+  끝났지만 새 숫자 명시 안 됨(원래 제한으로 자동 복귀)" 케이스가
+  2곳 있어(101km->130 복귀, 553km->100 복귀) 수동 재검토로 채워
+  넣음. 문서 내 "SA 주 기본 제한(country 100km/h, town 50km/h,
+  별도 명시 없으면)" 문구 확인 -> 호주 도로엔 항상 어떤 제한이든
+  적용된다는 전제 확인, searchsorted가 "제한 없음" 케이스를 고려할
+  필요 없음이 검증됨.
+- Configs/traffic_lights_2025.csv: distance_km, type
+  (traffic_light/pedestrian_light, 43행: traffic_light 39 +
+  pedestrian_light 4). Darwin(12) / Katherine(2) / Alice Springs
+  진입부(3) / Port Augusta(3) / Adelaide 최종 접근부(~23)에 집중
+  분포.
+
+[ 구현 - Functions/Vehicle_Function.py ]
+- light_arrive(curr_dist, light_dists, visited_lights): cs_arrive()와
+  같은 point-event 패턴이나, light_dists 값 자체가 dict-unique하지
+  않을 수 있어 enumerate() 기반 인덱스로 visited 추적(cs_arrive()는
+  거리값 자체로 추적).
+- compute_speed_limit(step, const): np.searchsorted(speed_limit_dists,
+  curr_dist_km, side="right") - 1, idx = max(idx, 0) 로 계단형 룩업.
+  매 스텝 재평가(한 번 지나가면 끝나는 point-event 아님, CS/신호등과
+  다른 패턴).
+- run_simulation() 루프 안, control_stop_handler() 처리 직후:
+  light_hit = light_arrive(...) -> visited_lights.add() ->
+  Accum_s += simpara.avg_traffic_light_delay(15s) 또는
+  avg_pedestrian_light_delay(10s).
+- const 딕셔너리에 speed_limit_dists/speed_limit_vals 추가(당시엔
+  route 세그먼트 데이터 없었음, 이후 progress/22에서 is_downhill/
+  is_uphill도 같은 자리에 추가됨).
+
+[ 구현 - mpc/mpc_controller.py ]
+- v = min(v, step["speed_limit"]) 클립 추가. **위치가 중요** -
+  v_min 하한 클램프와 drive.v_max 클립보다 반드시 **나중에** 와야 함.
+  안 그러면 v_min(예: 60) 강제 로직이 그보다 낮은 법정 속도제한(예:
+  CS 진입 25km/h)을 무시하고 덮어써버리는 실제 버그가 날 뻔했음
+  (설계 단계에서 사전에 인지, 코드 순서로 방지).
+
+[ 구현 - scripts/main.py, app.py (인프라) ]
+- 모듈 로드 시 한 번만 lights_df/speed_limits_df CSV 읽어서
+  light_dists/light_types/speed_limit_dists/speed_limit_vals 준비
+  (매 스텝 CSV 재조회 없음).
+- run_simulation() 호출부(objective() 안, 최종 재실행 둘 다) 인자에
+  반영.
+- app.py의 load_data()(@st.cache_data) 안으로 이동해 캐싱.
+
+[ 발견/수정된 버그 (이번 항목 관련) ]
+- lookahead_const -> const 이름 변경 시 compute_lookahead() 호출부
+  갱신 누락 (NameError) - 발견 후 수정 확인 완료.
+- const 딕셔너리 키 speed_limit_dist(단수) vs compute_speed_limit()의
+  speed_limit_dists(복수) 불일치 (KeyError) - 수정 확인 완료.
+- app.py load_data() 반환 튜플 개수 불일치(7 vs 9), 이후 반환문 내
+  speed_limits_dists(오타, 's' 추가) vs 실제 변수명 speed_limit_dists
+  불일치 - 둘 다 수정 확인 완료.
+- speed_limits_2025.csv 파일이 외부 프로그램에 열려있어 EPERM 락 -
+  사용자가 파일 닫은 후 수정 성공.
+
+[ 알려진 버그 - 아직 미수정 ]
+**light_arrive() 단위 불일치**: 호출부(run_simulation() 559행)에서
+`light_arrive(step["curr_dist"], light_dists, visited_lights)`로
+호출하는데, step["curr_dist"]는 **미터** 단위(route_dist 배열,
+예: 322000)인 반면 light_dists는 traffic_lights_2025.csv의
+distance_km 컬럼 그대로라 **km** 단위(예: 12.5). light_arrive()
+내부 비교(`abs(curr_dist - light_dist) < 20`)가 단위 안 맞는 두
+값을 그대로 빼고 있어, 사실상 신호등이 절대 트리거되지 않는 상태
+(예: |322000 - 12.5| ≈ 321987, 20보다 훨씬 큼). cs_arrive()는
+control_stops가 미터 단위라 정상 작동, compute_speed_limit()는
+curr_dist_km = curr_dist/1000 변환을 거쳐서 정상 작동 - light_arrive()
+에만 이 변환이 빠짐. 발견 시점: 2026-07-20(문서화 직전 재검증
+중), 사용자 판단으로 지금은 고치지 않고 백로그로만 남김
+(progress/23 참고). 고치는 법은 light_arrive() 안에서
+curr_dist_km = curr_dist/1000 변환 후 비교하거나, 호출부에서
+step["curr_dist"]/1000을 넘기면 됨.
+
+[ 상태 ]
+법정 속도제한은 정상 작동 확인. 신호등 지연은 **코드는 존재하나
+단위 버그로 실제로는 발동 안 함** - 다음 세션에서 고칠 것.
+================================================================

@@ -1,0 +1,137 @@
+================================================================
+[진행중] MPC 고도화 방향 논의 + 오르막/내리막 지형 전처리
+================================================================
+논의/착수일: 2026-07-20 (세션 재개 후) / 상태: 설계 완료, 구현 일부
+
+[ 배경 ]
+사용자가 다른 앱(Claude 앱)에서 나눈 프로젝트 방향성 논의를 가져와
+검토 요청. "규칙 기반 근사 MPC"에서 "비용함수+solver 기반 실제 MPC"로
+가는 전환 논의가 이번 세션의 큰 축. 진짜 MPC 전환 자체는 아직
+시작 안 했고(의도적으로 순서를 뒤로 미룸, 아래 참고), 대신 그
+전 단계로 필요한 물리 building block(코스팅/제동/경사 세그먼트)
+설계와 일부 구현을 진행함.
+
+[ MPC 전환 순서 합의 ]
+"규칙 기반 물리 로직(코스팅/브레이크/경사 세그먼트)을 먼저 완성해서
+동작이 말이 되는지 검증 -> 그 다음에 이 물리식들을 비용/제약항으로
+재구성해 solver 기반 MPC로 전환" 순서로 합의함. 이유: 물리 building
+block은 어느 쪽으로 가든 필요해서 먼저 만들어도 버려지지 않음,
+순서를 반대로 하면 물리 버그와 solver 튜닝 이슈가 뒤섞여 디버깅
+어려워짐.
+
+[ energy_crit 순환성 문제 제기 및 해소 방향 (논의만, 미구현) ]
+mpc_speed()의 LV4(에너지 예산) 항목의 energy_crit = (soc_start_min -
+soc_cutoff) / leg_dist_km가 "구간 전체에 SOC를 균등 배분"한다는
+가정을 깔고 있는데, 이게 사실 MPC가 원래 풀어야 할 문제(주어진
+지형/날씨에서 에너지를 어떻게 배분할까)를 사전에 퉁쳐버리는
+순환 논리라는 문제 제기. 해소 방향: 2-레벨 계층 - Level 1(CS
+출발 시 다음 CS까지 **지형만** 이용한 1회성 에너지 예산 배분,
+날씨는 forecast=actual 항상 일치하는 현재 시뮬레이션 구조상 장기
+사전계획에 넣지 않기로 함) + Level 2(기존 70km 룩어헤드처럼 실시간
+반응형 비교). **아직 코드 미반영, 설계 논의만 완료.**
+
+[ CS 접근 코스팅/제동 설계 (물리식 완성, 코드 미구현) ]
+- a_coast = (F_aero + F_roll + F_slope) / mass (cal_drive_res()의
+  저항력 계산 재사용, 구동력 없이 순수 저항만)
+- coast_distance = v² / (2*a_coast) (V²-V1²=2aS)
+- 내리막(a_coast<=0, 자연 감속 불가) 케이스는 simpara.decel_active
+  (신규 상수, **회생제동 명시적으로 배제** - 사용자 요청: "회생제동
+  말고 차량의 기존 브레이킹 시스템을 활용하는거지") 사용, 같은
+  공식 적용.
+- 두 경우 다 P_batt = power.P_LV_race만 (구동/회생 없음 - 관성/
+  기계브레이크는 배터리를 안 거침, 회생제동 효율 손실 문제를
+  아예 우회).
+- 트리거는 매 스텝 재평가(한 번 발동하고 끝나는 이벤트 아님).
+- **prev_v가 CS 정차 후 0으로 리셋 안 되던 버그 발견 -> 사용자가
+  직접 수정 완료 확인**(run_simulation() cs_stop_result["Action"]==
+  "Stop" 분기 안 prev_v=0 추가, 557행).
+- **코드 자체(코스팅 트리거, decel_active 상수, mpc_speed 클립)는
+  아직 미구현** - 사용자가 직접 작성하기로 함(아래 "코드 작성 주체"
+  참고).
+
+[ 오르막/내리막 지형 전처리 - read_path() 구현 완료 ]
+목적: 위 코스팅/제동 설계가 "언제 이 로직을 적용할지" 판단하려면
+경사 데이터를 오르막/내리막 세그먼트로 미리 분류해둬야 함.
+
+- **판정 기준**: 결정계수 = Crr*cos(theta) + sin(theta) (v-독립적,
+  F_roll+F_slope의 부호만 봄). 소각근사 시 decision_coeff ≈ slope
+  + Crr. 음수면 내리막(정지상태에서도 중력이 구름저항을 이김),
+  양수면 오르막. Crr=0.001이 작아서 경계각이 비대칭 - 내리막
+  경계 약 -0.23°, 오르막 경계 약 +0.11°(threshold=0.003 기준).
+- **노이즈 문제 발견**: route CSV가 20m 균일 간격인데(중앙값 정확히
+  20.00m, 실측 확인), raw slope=dy/dx를 그 간격으로 그냥 계산하면
+  고도 측정 오차가 작은 분모(20m)에 나눠지며 과대증폭됨 - threshold
+  0.003 기준으로 세그먼트를 나눠보니 7448개, 평균 122m, **5km 이상
+  세그먼트가 0개** (실제로는 스튜어트 하이웨이에 수 km급 완만한
+  경사가 있어야 정상인데 노이즈에 파묻힘, 분석 스크립트로 실측 확인).
+- **해결**: 500m 이동평균(rolling, center=True, min_periods=1)으로
+  slope 스무딩 후 재분류. 윈도우 크기별 비교(300/500/1000/2000/
+  5000m) 실측 분석 결과 500m가 노이즈 제거와 경계 뭉개짐 사이
+  균형점으로 사용자 확인. 500m 기준 세그먼트 2559개, 최장
+  5.64km(2918.6~2924.2km) 확인.
+- **실제 지형 검증**: outputs/terrain_elevation_cs.png(CS 지명
+  라벨 포함 고도 프로파일)로 확인 - 최고점 729m@1478km이 Alice
+  Springs(CS5, 1496km) 실제 고도(~570~660m대)와 지리적으로
+  일치(고개를 넘고 계곡의 Alice Springs로 내려가는 실제 지형과
+  부합) - 데이터 오류 아니라 실제 중앙호주 고원 지형임을 확인.
+- **read_path() 구현 완료** (Functions/Vehicle_Function.py):
+  window_pts = round(500/delta_dist.median()) -> slope_smooth =
+  df["slope"].rolling(window=window_pts, center=True,
+  min_periods=1).mean() -> decision_coeff = slope_smooth +
+  physics.Crr -> df["is_downhill"]/df["is_uphill"] = 부호 판정
+  (threshold=0.003) -> return df[[..., "is_downhill",
+  "is_uphill"]]. 최초 작성 시 return문 문법 오류(리스트 3개를
+  콤마로 나열, TypeError 유발 가능성) 있었으나 사용자가 직접 수정
+  확인 완료.
+- **인프라 배관 완료**: scripts/main.py, app.py의 route_np 딕셔너리에
+  is_downhill/is_uphill 추가(.to_numpy()), run_simulation()에서
+  route_is_downhill/route_is_uphill 추출해 const 딕셔너리에 추가
+  (Vehicle_Function.py 452~453, 464~465행) - 전부 확인 완료.
+
+[ 오르막 처리 방향 - 별도 설계 (코드 미구현, 의도적으로 보류) ]
+내리막과 달리 오르막은 "공짜 에너지"가 없음(위치에너지는 언제
+공급하든 총량 동일) - 미리 가속하는 게 이득인 진짜 이유는
+update_soc()(Vehicle_Function.py ~105행)에 이미 모델링된
+**P_loss = I²·R_eq**(배터리 내부저항 손실, 전류/파워의 제곱에
+비례)때문. 파워 프로파일을 평탄하게(오르막 도중 피크 파워를
+낮추고 미리 쌓아둔 운동에너지로 대체) 만들면 총 에너지가 같아도
+제곱 손실이 줄어듦. 내리막처럼 깔끔한 폐형해(kinematic)가 없고
+순수 트레이드오프 최적화 문제라, **비용함수 MPC 전환 시 P_batt
+또는 전류에 대한 명시적 quadratic cost term으로 넣는 방향으로
+합의** - 규칙 기반 세그먼트 공식을 억지로 만들지 않기로 함. 현재는
+기존 momentum_gain 항(이미 가속 중이면 slope 페널티 완화)이
+그 자리를 대신 채우고 있음, 변경 없음.
+
+[ 코드 작성 주체 ]
+이번 항목(CS 코스팅/제동, compute_downhill_cap() 등)은 전부 사용자가
+Functions/Vehicle_Function.py와 mpc/mpc_controller.py에 직접
+작성하기로 함 - Claude는 물리식/함수 시그니처/후크 지점 스펙만
+텍스트로 제공, 파일 직접 수정은 안 함(read_path() 배관까지는
+Claude가 인프라로 직접 수정, 하지만 알고리즘 로직 자체는 사용자
+작성). 인프라(CSV, main.py/app.py 배관)는 Claude가 직접 수정.
+
+[ 다음에 이어서 할 것 - 순서대로 ]
+1. compute_downhill_cap(step, const) 구현 (Vehicle_Function.py,
+   사용자 작성 예정) - const["downhill_start_dists"]/
+   ["downhill_end_dists"]/["downhill_theta"] 배열이 먼저 필요
+   (아래 참고, 아직 미구현).
+2. 그 전에: 세그먼트 경계 배열 추출(main.py/app.py에서 1회성 계산,
+   np.diff+np.where+np.concatenate로 is_downhill 불리언 배열을
+   [시작거리, 끝거리, 대표경사각] 배열로 변환) - **작성 중, 아직
+   미완성**(np.where() 인자 미완성 상태로 세션 종료).
+3. CS 접근 코스팅/제동(coast_distance, decel_active) 실제 구현.
+4. simpara.decel_active 상수를 Configs/Vehicle_Params.py에 추가.
+5. mpc_speed()에 downhill_v_cap 클립 추가 (speed_limit 클립과
+   같은 자리, min()으로 같이 적용 가능 - CS 코스팅과 내리막 진입
+   캡이 동시에 걸려도 더 보수적인 쪽이 자동으로 이김).
+
+[ 상세 스펙 ]
+Claude가 제공한 정확한 함수 스펙(변수명, 공식, 후크 지점)은 이
+대화 세션 텍스트에만 있고 별도 파일로 옮겨두지 않음 - 다른
+컴퓨터에서 이어갈 때 이 항목이 필요하면 Claude에게 "위 1~5번
+항목 스펙 다시 정리해줘" 요청할 것.
+
+[ 상태 ]
+설계 완료, read_path()/인프라 배관까지 구현+검증 완료. 실제 코스팅/
+제동/오르막 세그먼트 활용 로직은 미구현 - 다음 세션 최우선 작업.
+================================================================

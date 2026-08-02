@@ -1,0 +1,78 @@
+================================================================
+[완료] run_simulation() 함수분리 중 / 실행 중 발견된 크래시 버그 모음
+================================================================
+완료일: 2026-07-20
+
+progress/14(함수분리 자체)와 별개로, 함수분리 도중 그리고 처음
+실행해보는 과정에서 노출된 크래시 버그들. 대부분 "step은 매
+iteration마다 새로 생성되는 일회용 dict라 반복 간 상태는 bare
+변수로 이어야 한다"는 원칙(progress/14 참고)을 놓쳐서 발생.
+
+[ 1. step에 soc 키 누락 ]
+초기 step dict 생성부에 soc가 안 들어있어 mpc_speed()에서
+step["soc"] 참조 시 KeyError. 추가.
+
+[ 2. bare curr_dist 잔존 참조 4곳 ]
+curr_dist를 step["curr_dist"]로 전환하면서 nearest_map[curr_dist],
+cs_arrive(curr_dist, ...), leg_dist_goto 계산, last_cs_dist =
+curr_dist 4곳이 bare 변수를 그대로 참조해 NameError. 전부
+step["curr_dist"]로 교체.
+
+[ 3. results.append() 딕셔너리 콤마 누락 ]
+"P_net": step["P_net"] 다음 줄에 콤마 없이 "slope": ... 이어져서
+SyntaxError.
+
+[ 4. results.append()의 DY/HR/soc가 stale한 step 값을 참조 ]
+step 최상단 스냅샷이 아니라 이번 스텝 최종 확정값(bare DY/HR/soc)을
+쓰도록 수정.
+
+[ 5. prev_V_terminal carry-over 누락 ]
+update_soc()가 반환하는 V_terminal을 step["prev_V_terminal"]에만
+쓰고 bare prev_V_terminal 재할당을 안 해서, step은 매 iteration
+새로 생성되는 dict라 다음 스텝에 전혀 반영이 안 되는 문제(=Accum_s
+/soc와 똑같은 패턴 위반). bare prev_V_terminal = V_terminal로 수정.
+
+[ 6. prev_V_terminal 초기값 오류 ]
+기존 drive.motor_nom_dcV(150V, 모터 정격 입력전압 스펙)를 쓰고
+있었는데, 이건 배터리 팩 터미널 전압과 무관한 값. SOC=1.0 기준
+실제 팩 OCV(~168V)와 다른 물리량을 섞어 쓰던 기존 버그(리팩터링
+이전부터 있던 문제였으나 이번에 발견/수정).
+np.interp(simpara.soc, cell.ocv_soc, cell.ocv_V) * pack.HV_S로
+교체(개념적으로 맞는 초기값).
+
+[ 7. prev_a 초기화 누락 ]
+Configs/Vehicle_Params.py의 simpara.a를 simpara.prev_a로 개명(이름
+일관성)했는데, run_simulation() 초기 선언부에 prev_a =
+simpara.prev_a 추가를 빼먹어 첫 iteration부터 NameError. 추가.
+
+[ 8. cs_stop_simulation()의 update_soc() 호출 시그니처 불일치 ]
+update_soc()가 (soc, step, dt) 3-인자로 바뀌었는데
+cs_stop_simulation()은 옛날 (soc, P_gen, P_batt, dt) 4-인자 방식
+으로 호출 -> TypeError. {"P_batt": power.P_LV_chg, "P_gen":
+P_gen_cs_real} dict를 만들어 넘기도록 수정(CS 정차 중에는 주행이
+아니라 LV 충전 소비/태양광 발전이 P_batt/P_gen 역할).
+
+[ 9. dt=0 나눗셈으로 인한 NaN 전파 (신규 버그, a 동적화로 노출) ]
+cal_drive_res()의 a = (v-prev_v)/dt에서, route 데이터에 연속된
+두 지점의 거리가 같은 스텝(delta_dist=0)이 있으면 dt=0이 되어
+0-나눗셈 -> inf/nan.
+전파 경로: F_acc(nan) -> P_batt(nan) -> update_soc()의 sqrt(음수)
+-> soc가 nan으로 오염 -> Accum_s까지 전파 -> calender_handler의
+int(nan//86400)에서 최종적으로 "cannot convert float NaN to
+integer" 크래시로 표면화.
+a가 고정 상수이던 기존 코드에선 이 나눗셈 자체가 없어 드러나지
+않던 엣지케이스. `a = (v - prev_v) / dt if dt > 0 else 0.0`로
+방어 코드 추가.
+**미해결 참고사항**: route CSV(`2027 BWSC TRACK.csv`)의
+total_distance_m 중복 여부가 근본 원인인지는 아직 직접 확인 안 함
+- 방어 코드로 크래시는 막았으나, 데이터 자체의 문제인지는 미확인
+채로 남아있음.
+
+[ 상태 ]
+위 9개 버그 전부 수정 완료, Optuna 트라이얼이 에러 없이 도는 것까지
+확인. 다만 progress/18(백로그) 최상단에 있듯 리팩터링 전후 A/B
+비교 검증은 아직 미실행.
+
+[ 관련 파일 ]
+Functions/Vehicle_Function.py, Configs/Vehicle_Params.py
+================================================================

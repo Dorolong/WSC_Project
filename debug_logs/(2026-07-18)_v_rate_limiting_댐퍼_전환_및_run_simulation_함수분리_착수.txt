@@ -1,0 +1,189 @@
+================================================================
+(2026-07-18) v_rate_limiting 댐퍼 전환 및 run_simulation() 함수분리 착수
+================================================================
+
+[ 1. v_rate_limiting -> EMA+tanh 댐퍼 전환 ]
+
+배경: 기존 v = prev_v + clip(v_target-prev_v, -max_delta, max_delta)는
+변화폭 "크기"만 볼 뿐, 그 변동이 반복적인 오실레이션인지 한 번의
+진짜 트렌드인지 구분을 못 함. "댐퍼처럼, 빠른 변동엔 세게 누르고
+느린 변동(추세)엔 그대로 올리자"는 요청에서 시작.
+
+설계 과정:
+1) 1차 저역통과 필터(EMA) 제안: v = prev_v + alpha*(v_target-prev_v)
+   - "alpha가 상수인데 어떻게 빠른/느린 변동을 구분하나?"는 질문에
+     수치 예시로 검증: 느린 추세(매 스텝 +1)는 격차가 일정값으로
+     수렴하며 결국 같은 기울기로 따라가고, 빠른 오실레이션(70<->74
+     반복)은 스텝마다 반대 방향 보정이 서로 상쇄되어 훨씬 작은
+     진폭으로만 흔들림 - 같은 alpha라도 입력 패턴에 따라 실제
+     감쇠 정도가 완전히 달라지는 게 저역통과 필터의 주파수 응답
+     특성임을 확인.
+2) "한 번의 큰 스텝은 방어 못 하지 않나?" 지적 - 맞는 지적. EMA는
+   절대 상한이 없어서 alpha*delta가 크면(예: 한 스텝에 target이
+   50 튀면) 그만큼 큰 변화가 그대로 나감. 순수 EMA만으론 기존
+   max_delta 하드 클램프가 하던 "단일 이상치 절대 방어" 기능을
+   잃음.
+3) 최종 해법 - tanh 안에 alpha를 정규화해서 결합:
+     delta = v_target - prev_v
+     v = prev_v + max_delta * tanh(alpha * delta / max_delta)
+   - delta가 작을 때: tanh(x)~=x 근사로 f(delta) ~= alpha*delta
+     (EMA와 동일한 소신호 거동)
+   - delta가 클 때: tanh가 +-1로 포화되어 f(delta) -> +-max_delta
+     (기존 하드 클램프와 동일한 절대 상한)
+   - "왜 안쪽에 /max_delta를 나누나"라는 질문에 역산으로 답변:
+     소신호에서 f(delta)=alpha*delta가 되려면
+     max_delta*argument=alpha*delta -> argument=alpha*delta/max_delta
+     여야 함. 나눗셈이 없으면 소신호 기울기가 alpha가 아니라
+     max_delta*alpha가 되어버려 의도한 감쇠 비율이 틀어짐.
+   - tanh 하나로 EMA(오실레이션 감쇠)와 하드클램프(단일 이상치
+     방어) 두 기능을 미분 불연속 없이 통합.
+
+max_delta 소속 변경: mpc_default_params(v_rate_limiting, MPC 튜닝
+계수 취급)에서 Configs/Vehicle_Params.py의 simpara.max_v_delta로
+이동. 근거: 이건 "MPC가 어떻게 반응할지" 튜닝 대상이 아니라 "차량이
+실제로 낼 수 있는 최대 가감속 능력"이라는 물리 스펙이라 drive.v_max
+등과 같은 급에 속함(Optuna 탐색공간에도 애초에 없었음, 확인함).
+
+단위 버그: 옮기는 과정에서 max_v_delta가 처음 5(주석 [m/s])로
+설정됐는데, 기존 v_rate_limiting=5/3.6(5km/h를 m/s로 환산한 값)과
+비교하면 3.6배 느슨해지는 실수였음. 사용자 확인 후 2 m/s(=7.2km/h
+per step)로 확정.
+mpc_default_params의 죽은 키 v_rate_limiting도 삭제 완료.
+
+[ 1-1. 속도 정수(int) 출력 범위 확정 ]
+AskUserQuestion으로 확인: 내부 물리 계산(dt, P_batt, update_soc)과
+EMA/tanh 댐퍼는 계속 float 유지, 정수 반올림은 results.append() 등
+최종 저장/출력 시점에만 적용하기로 결정. 매 스텝 내부까지 정수로
+강제하면 댐퍼가 계산한 1km/h 미만 조정분이 반올림으로 0이 되어
+속도가 고착되는 문제 있어 제외. **아직 코드에 실제 반영은 안 됨**
+(results.append()에 반올림 로직 추가 필요, progress/13 백로그 참고).
+
+[ 2. 4개 미래 과제 논의 (진행중 대화에서 요청받아 실현가능성 평가) ]
+1) max_delta 댐퍼화 -> 위 1번에서 완료
+2) run_simulation() 함수 분리 -> 아래 3번에서 착수
+3) simpara.a 동적 변수화 -> 아직 미착수, progress/13 백로그 유지.
+   LV2 slope look-ahead(아래 참고)와 연결됨: a가 고정 상수인 동안은
+   "언덕 전에 가속해서 관성으로 넘는" 효과가 모델에 없어서 slope
+   look-ahead 실효성이 제한적(이론적 근거는 momentum이 아니라 rate
+   limiter 지연 해소 쪽).
+4) 실제 MPC 정의 대비 부족한 점 분석 -> 답변 완료(수치 최적화/명시적
+   objective/제약조건 내재화가 없고, receding horizon과 부분적
+   예측만 있는 "규칙 기반 근사 MPC"라는 결론). progress/13에 기록.
+
+[ 3. Colab/병렬화 논의 - 결론: 나중에(탐색 직전) 처리하기로 함 ]
+연산량 증가(N-포인트 샘플링 등) 우려로 Colab 활용 가능성 질문 받음.
+결론: 이 워크로드(상태 의존적 순차 Python 루프)는 GPU/TPU로
+병렬화가 안 되고, 무료 Colab 세션 제한(유휴 ~90분, 실행시간 제한)이
+장시간 무인 Optuna 탐색엔 오히려 불리해서 권장 안 함. 대신:
+- 트라이얼 병렬화가 더 직접적 - 단, Optuna study.optimize()의
+  n_jobs는 스레드 기반이라 GIL 때문에 CPU-bound 순수 Python
+  루프에는 실효성 없음. 실제로는 별도 OS 프로세스 여러 개를 같은
+  SQLite storage(outputs/optuna_study.db)에 붙여서 돌리는 방식
+  권장(Optuna가 지원하는 분산 패턴). PC 4코어 확인함.
+  SQLite 동시쓰기 안정성을 위해 WAL 모드 전환 권장
+  (sqlite3.connect(...).execute("PRAGMA journal_mode=WAL;")).
+- numba JIT으로 루프 자체를 가속하는 것도 대안으로 제시.
+사용자 결정: 지금 당장 적용 안 하고, 탐색 돌리기 직전에 설정하기로
+보류.
+
+[ 4. run_simulation() 함수 분리 착수 ]
+
+배경: 함수가 200줄 넘게 길어져서 100줄 이내로 쪼개고 싶다는 요청.
+분석 결과 순수 계산 부분만 빼서는 40~50줄 정도만 줄어 100줄 목표는
+어려움 - continue/break가 있는 블록(야간처리/CS처리/env_row조회/
+SOC하한)까지 빼야 하는데, 파이썬은 함수 안에서 continue/break를
+바깥 루프로 전달 못 하므로 "action dict를 리턴하고 실제
+continue/break는 메인 루프에 남기는" 패턴이 필요함을 확인.
+
+최종 함수 분리 계획 (6개):
+1) compute_lookahead(step, const) - **구현 완료** (아래 상세)
+2) compute_required_paces(step, ...) - required_race_pace,
+   required_next_cs_pace 계산. **설계만 논의됨, 미구현**
+3) compute_v_max_derated(step) - 전압 디레이팅. **미착수**
+4) handle_calendar(Accum_s, DY, HR) - 야간 리셋 + 27일 초과 체크,
+   action dict({"action": "reset"/"stop"/"ok"}) 패턴. **미착수**
+5) handle_control_stop(...) - CS 도착/마감/구간속도 실격 체크 +
+   cs_stop_simulation 호출, action dict 패턴. **미착수**
+6) update_vehicle_state(...) - P_batt/P_gen/soc 갱신 + prev_wind/
+   heading 업데이트. **미착수**
+
+주의사항(사용자와 합의): 4, 5번은 컨트롤스탑 마감/실격처럼 이번
+세션에 버그(야간 리셋 버그)가 났던 민감한 로직이라, 분리 후
+리팩터링 전후 A/B 비교(같은 파라미터/날씨로 결과 동일한지)를 꼭
+거치기로 함.
+
+**설계 방향 확정 (중요, 다음 작업에 이어서 적용)**: 함수마다 다른
+조합의 dict를 새로 만드는 대신, 루프 시작 시 step dict 하나를
+raw 값들로 먼저 만들고, 이후 각 헬퍼 함수가 계산한 결과를 그
+step에 계속 채워 넣는 방식으로 통일하기로 함:
+    step = dict(curr_dist=..., prev_v=..., Accum_s=..., ...)
+    step["avg_gen_ratio"], step["slope_ahead"] = compute_lookahead(step, const)
+    step["required_race_pace"], step["required_next_cs_pace"] = compute_required_paces(step)
+    step["v_max_derated"] = compute_v_max_derated(step)
+    v = mpc_speed(step, params)   # 별도 state dict 안 만들고 step을 그대로 사용
+한 줄짜리 단순 계산(gen_ratio, next_cs/remaining_dist/leg_dist_km,
+위치 캡처 등)은 함수로 빼지 않고 step에 바로 대입. 진짜 여러 줄
+로직이 있는 것만 함수로 분리. **아직 이 구조로 전면 개편은 안 됨**
+- compute_lookahead()만 기존 방식(step/lookahead_const 별도 dict,
+  최종적으로 별도 state dict에 값 복사)으로 구현돼 있어서, 나머지
+  함수 만들 때 이 통합 패턴에 맞춰 재정리 필요.
+
+[ compute_lookahead(step, const) 구현 상세 ]
+avg_gen_ratio(기존 N-포인트 가중평균)와 신규 slope_ahead(LV2 경사
+look-ahead)를 하나의 함수로 통합.
+
+**slope_ahead 신설 배경**: "경사도 look-ahead 넣을 때, 단순 경사값
+뿐 아니라 그 경사가 얼마나 오래 이어지는지도 반영하면 좋겠다"는
+요청. 해법: 단일 지점 조회 대신 현재 위치~2km 앞까지 구간의 평균
+slope를 사용(route_slope[i:future_slope_idx+1].mean()). route
+데이터가 ~20m 간격으로 촘촘해서, 구간 평균이 자동으로 "긴 오르막은
+크게, 짧은 둔덕은 희석되어 작게" 반영함 - 별도 파라미터 없이
+duration 가중이 공짜로 딸려옴.
+
+route 인덱스 탐색은 np.searchsorted(route_dist, target) 사용(route가
+정렬돼 있어 이진탐색 가능, O(log n)). 기존 LV4의 dist_vals(305개)용
+argmin()과 달리 route_dist는 15만 행이라 argmin은 부담이 커서
+searchsorted로 대체. min(searchsorted결과, n-1)으로 배열 끝단 경계
+보호(레이스 종점 근처에서 out-of-bounds 방지 - 실측 결과
+route_dist.max()=3038326.156이 race.total_distance=3038326보다
+커서 지금 데이터로는 트리거 안 되지만, 두 값이 독립적으로 관리되는
+값이라 안전망으로 유지 결정).
+
+**구현 중 발견/수정된 버그들**:
+1) n = const["n"] 추출 누락 (NameError)
+2) race.total_distnace 오타 (AttributeError, total_distance가 맞음)
+3) run_simulation() 쪽에 compute_lookahead() 실제 호출 자체가
+   누락되고, 옛날 avg_gen_ratio 계산 잔재(정의 안 된
+   gen_ratio_samples/weight_samples 참조)가 그대로 남아있었음 ->
+   step dict 생성 + compute_lookahead() 호출로 교체
+4) 루프 시작 전 lookahead_const dict(env_data, dist_vals, rad_max,
+   route_dist, route_slope, n) 생성 누락 -> 추가
+5) state dict에 slope_ahead 키 누락 -> 추가
+6) 이제 안 쓰는 target_spacing_km=70(run_simulation 최상단, 원래
+   위치) 죽은 코드 -> 삭제, compute_lookahead() 내부로 이동 완료
+
+**mpc_controller.py 반영**: LV2가 state["slope"] 대신
+state["slope_ahead"]를 사용하도록 변경 완료, 확인함.
+
+**최종 검증**: state dict가 제공하는 14개 키(soc, slope_ahead,
+gen_ratio, avg_gen_ratio, remaining_dist, leg_dist_km, prev_v,
+wind_speed, wind_direction, vehicle_heading, v_max_derated,
+required_race_pace, required_next_cs_pace, gen_ratio_std)와
+mpc_speed()가 참조하는 키가 정확히 일치함을 확인 완료.
+
+[ 이번 라운드에서 삭제한 것 ]
+outputs/optuna_study.db (트라이얼 7개, 완료 6개, 진행 미미) -
+아카이브 없이 바로 삭제.
+
+[ 상태 ]
+v_rate_limiting 댐퍼 전환 완료. compute_lookahead()(avg_gen_ratio+
+slope_ahead) 구현 및 검증 완료. run_simulation() 함수분리는 1/6
+완료, 나머지 5개는 설계 방향(step 누적 패턴)만 확정, 미착수.
+정수 출력 처리도 결정만 되고 미구현. 이 상태로는 아직 Optuna
+탐색 재실행 전 - 함수분리 마저 진행하거나, 지금 상태로 바로
+탐색을 돌릴 수도 있음(둘은 독립적인 작업).
+
+[ 관련 파일 ]
+mpc/mpc_controller.py, Functions/Vehicle_Function.py,
+Configs/Vehicle_Params.py (simpara.max_v_delta 추가)
+================================================================

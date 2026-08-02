@@ -1,0 +1,27 @@
+================================================================
+[완료] v_rate_limiting -> 댐퍼(EMA+tanh) 방식 전환
+================================================================
+완료일: 2026-07-18
+
+mpc_controller.py에 다음 형태로 반영됨:
+    delta = v - step["prev_v"]
+    v = step["prev_v"] + simpara.max_v_delta * tanh(alpha * delta / simpara.max_v_delta)
+
+- delta 작을 때 alpha*delta로 근사(EMA처럼 오실레이션 감쇠, 느린
+  추세는 온전히 따라감), delta 클 때 +-max_v_delta로 포화(단일
+  이상치 절대 방어) - 하나의 식으로 통합.
+- max_v_delta는 mpc_default_params(v_rate_limiting)에서
+  Configs/Vehicle_Params.py의 simpara.max_v_delta로 이동(물리 상수
+  취급, 2 m/s로 확정 - 옮기는 과정에서 처음 5로 잘못 설정했다가
+  기존 v_rate_limiting=5/3.6과 비교해 3.6배 느슨해지는 단위 실수를
+  발견, 사용자 확인 후 2 m/s로 재확정). alpha는 mpc_default_params에
+  남고 기본값 0.3, 탐색공간에는 아직 안 넣음(고정값).
+- mpc_default_params의 죽은 키 v_rate_limiting 삭제 완료.
+
+상세 설계 논의(왜 tanh 안에 alpha를 정규화해서 넣는지 등)는
+debug_logs/(2026-07-18)_v_rate_limiting_댐퍼_전환_및_run_simulation_함수분리_착수.txt
+참고.
+
+[ 관련 파일 ]
+mpc/mpc_controller.py, Configs/Vehicle_Params.py
+================================================================

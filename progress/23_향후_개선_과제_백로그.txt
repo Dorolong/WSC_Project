@@ -1,0 +1,100 @@
+================================================================
+향후 개선 과제 백로그 (2026-07-20 기준 최신, progress/18 대체)
+================================================================
+[ 이 파일의 번호는 항상 progress/ 폴더의 가장 끝 번호로 유지할 것 -
+  완료된 항목은 여기서 지우고 progress/NN_주제.txt로 번호를 이어
+  붙여 별도 파일로 옮긴다. 새 항목이 생겨 이 파일을 다시 갱신할
+  때는 이 파일 자체를 다음 번호로 새로 저장하고 이전 버전(지금은
+  progress/18)은 삭제한다. ]
+
+[ 다른 컴퓨터/세션에서 이어서 시작할 때 여기부터 읽을 것 ]
+run_simulation() 함수 분리(6/6) + A/B 검증, simpara.a 동적화 + LV2
+momentum 결합, dist_vals 성능버그 수정, 실제 2025 BWSC 속도제한/
+신호등 데이터 반영, Optuna 날씨 섭동 CS구간 상관화, 오르막/내리막
+지형 세그먼트 전처리(read_path()) 전부 완료됨 (완료 이력:
+progress/13~17, 19, 20, 21). 코드 최신 상태 요약은 progress/07
+(Vehicle_Function.py), progress/08(mpc_controller.py) 참고.
+
+**지금 이어서 할 일 1순위 - MPC 물리 building block 완성
+(설계 완료, 코드 없음, progress/22에 전체 스펙 정리돼 있음)**:
+1. 내리막 세그먼트 경계 배열 추출 (main.py/app.py, route_np 만드는
+   부분 근처): is_downhill 불리언 배열(read_path()가 이미 생성) ->
+   np.diff+np.where+np.concatenate로 [시작거리, 끝거리, 대표경사각]
+   3개 배열로 변환, 1회성 계산. **작성 중 미완성 상태로 세션
+   종료됨** (main.py에 change_idx = np.where()까지만 써져 있고
+   괄호 안 인자/이후 로직 미완성).
+2. compute_downhill_cap(step, const) (Vehicle_Function.py, 사용자
+   직접 작성 예정): 위 배열로 세그먼트 진입 전 목표속도 상한 계산.
+   물리식: a_coast=(F_aero+F_roll+F_slope)/mass, v_entry_max =
+   sqrt(v_exit_cap² - 2·a_coast·L). mpc_speed()의 speed_limit 클립
+   자리에 v=min(v, downhill_v_cap) 추가.
+3. CS 접근 코스팅/제동 (Vehicle_Function.py, mpc_controller.py,
+   사용자 직접 작성 예정): coast_distance=v²/(2·a_coast) 트리거로
+   가속 해제, 내리막(a_coast<=0)은 신규 상수 simpara.decel_active
+   (회생제동 배제, 기계 브레이크 감속도)로 같은 공식. 코스팅/제동
+   중엔 P_batt=power.P_LV_race만(배터리 안 거침).
+4. simpara.decel_active 상수를 Configs/Vehicle_Params.py에 추가
+   (사용자 직접 작성 예정, 값은 실제 차량 브레이크 성능에 맞춰
+   결정 필요).
+5. 위 1~4 다 되면: light_arrive() 단위 불일치 버그 수정(아래 참고),
+   그 다음 50-trial Optuna 재탐색(현재 main.py가 n_trials=2 +
+   임시 study_name/storage "_test"로 세팅된 스모크테스트 상태 -
+   본 탐색 전 n_trials=50, study_name="WSC_MPC_Opt",
+   storage="sqlite:///outputs/optuna_study.db"로 되돌릴 것).
+
+[ 알려진 버그 - 수정 안 하기로 결정, 백로그로만 유지 ]
+- **light_arrive() 단위 불일치** (progress/20 상세): 호출부가
+  넘기는 step["curr_dist"]는 미터인데 light_dists는 km라 비교가
+  항상 실패 -> 신호등 지연이 사실상 발동 안 함. 고치는 법:
+  light_arrive() 안에서 curr_dist/1000 변환 후 비교, 또는 호출부
+  에서 미리 변환해 넘기기. 사용자가 지금은 보류 결정(2026-07-20).
+
+[ 2순위 - 예전부터 보류 중이던 항목 ]
+1. 속도값 정수(int) 출력 반영 - 결정만 되고 아직 미반영. 내부
+   물리 계산(dt, P_batt, update_soc 등)과 EMA/tanh 댐퍼는 계속
+   float로 정밀하게 유지, 정수 반올림은 **결과 저장/출력 시점에만**
+   (run_simulation()의 results.append({"v": ...}) 부분) 적용.
+   매 스텝 내부 계산까지 정수로 강제하면 댐퍼가 계산한 1km/h 미만
+   조정분이 반올림으로 0이 되어 속도가 고착되는 문제가 있어 제외.
+2. Optuna 트라이얼 병렬화(SQLite WAL 모드 + 별도 프로세스) - 탐색
+   재실행 직전 처리하기로 계속 보류 중. n_jobs는 GIL 때문에
+   CPU-bound 순수 Python 루프엔 실효성 없음, 별도 프로세스 여러
+   개(4코어 확인됨)를 같은 SQLite storage에 붙이는 방식 필요,
+   sqlite3.connect(...).execute("PRAGMA journal_mode=WAL;") 권장.
+   Colab은 이 워크로드(상태 의존적 순차 Python 루프)엔 안 맞아서
+   검토 안 하기로 함.
+3. momentum_gain을 Optuna 탐색공간에 넣을지 여부 - 위 1~5 정리
+   끝나고 본 탐색 재실행할 때 같이 결정.
+4. (선택, 급하지 않음) mpc_speed()의 np.clip() 스칼라 호출을 순수
+   파이썬 max()/min()으로 교체.
+
+[ 참고 - 실제 MPC 정의 대비 현재 모델의 한계 (분석, 액션 아이템 아님) ]
+없는 것: 명시적 예측 모델 기반 수치 최적화(매 스텝 비용함수를
+최소화하는 제어 시퀀스를 실제로 풂), 명시적 objective function,
+제약조건을 최적화 내부에서 다루는 것(현재는 soc_cutoff/v_max/
+speed_limit 등 전부 사후 클리핑).
+있는 것: receding horizon(매 스텝 상태 재측정 후 재계산), 상태
+피드백, 부분적 예측(avg_gen_ratio, slope_ahead).
+전환 순서 합의: 위 1순위(코스팅/제동/세그먼트) 규칙 기반으로 먼저
+완성 -> 물리적으로 말이 되는지 검증 -> 그 다음 비용함수+solver로
+재구성. 오르막은 배터리 I²R 손실(제곱 손실) 기반 비용항으로,
+energy_crit의 균등배분 가정도 지형 기반 1회성 예산 배분으로 재설계
+예정(둘 다 설계 논의만 완료, progress/22 참고).
+
+[ 완료 이력 (이 백로그에서 빠진 완료 항목들의 위치) ]
+- progress/13: v_rate_limiting -> 댐퍼(EMA+tanh) 전환 (2026-07-18)
+- progress/14: run_simulation() 함수 분리 6/6 (2026-07-20)
+- progress/15: 함수분리 중 발견된 크래시 버그 모음 (2026-07-20)
+- progress/16: simpara.a 동적화 + LV2 momentum 결합 (2026-07-20)
+- progress/17: dist_vals pandas Index 성능버그 수정, 4.2배 개선
+  (2026-07-20)
+- progress/19: run_simulation() 함수분리 리팩터링 A/B 비교 검증
+  완료 (2026-07-20)
+- progress/20: 실제 2025 BWSC 속도제한/신호등 데이터 반영
+  (2026-07-20, 세션 재개 후) - light_arrive() 단위버그는 미수정
+- progress/21: Optuna 날씨 섭동 CS구간 상관화 (2026-07-20, 세션
+  재개 후)
+- progress/22: MPC 비용함수 전환 방향 논의 + 오르막/내리막 지형
+  세그먼트 전처리 (2026-07-20, 세션 재개 후) - **진행중**,
+  read_path()만 완료, 나머지는 위 "1순위" 참고
+================================================================

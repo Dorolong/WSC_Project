@@ -1,0 +1,38 @@
+================================================================
+시뮬레이션 엔진 개선 (버그 수정 + 속도 최적화)
+================================================================
+
+[ 버그: pack.Cell이 전역 cell과 분리되어 있던 문제 ]
+Configs/Vehicle_Params.py의 BatteryPack 데이터클래스가
+`Cell: BatteryCell = field(default_factory=BatteryCell)`로 자기만의
+독립된 Cell 사본을 갖고 있었음. app.py "차량 제원 설정" 다이얼로그에서
+배터리 셀 값을 바꿔도 그건 전역 `cell` 객체만 바뀌고, pack.HV_Energy /
+HV_Req 같은 파생값은 pack의 사본 Cell 기준으로 계산돼서 절대 갱신 안 됨.
+-> 파일 하단에서 `pack.Cell = cell`로 참조를 통일하고 `pack.__post_init__()`
+   재호출하도록 수정. 검증: cell.Capa_batt 변경 시 pack.HV_Energy가
+   2592Wh -> 3456Wh로 정상 반영되는 것 확인.
+
+[ 속도 최적화 1: env_data 조회를 dict 기반으로 전환 ]
+- 문제: run_simulation()이 매 스텝 env_data.loc[(dist,DY,HR)]를 최대 3번
+  (현재위치/LV7 미래예측/CS정차) 호출 -> 트라이얼당 45만 회 이상.
+  pandas .loc 호출마다 Series 객체를 새로 만드는 오버헤드 누적.
+- 해결: env_data.to_dict("index")로 dict 변환 후 .get()으로 O(1) 조회.
+  dict-of-dict 구조라 env_row["shortwave_radiation"] 같은 기존 코드 그대로
+  재사용 가능 (.loc[튜플] -> .get(튜플)만 교체).
+- 결과: 트라이얼당 2분+ -> 1분 13초
+
+[ 속도 최적화 2: route를 numpy 배열로 전환 ]
+- 문제: route.iloc[i-1], route.iloc[i]도 매 스텝 새 Series 생성.
+- 해결: route 컬럼(dist/lat/lon/slope/theta)을 numpy 배열로 미리 추출해서
+  인덱싱. 단, i가 함수 중간에 증가하는 지점이 있어서 필요한 값을
+  루프 최상단에서 전부 지역변수로 캡처해두는 방식으로 재작성 (안 그러면
+  i 증가 이후 엉뚱한 행을 참조하는 버그 발생 가능).
+- 결과: 트라이얼당 1분 13초 -> 18.8초 (dict 캐싱 포함 최초 대비 약 6~7배)
+
+[ 관련 파일 ]
+Configs/Vehicle_Params.py, Functions/Vehicle_Function.py,
+scripts/main.py, app.py (env_dict/route_np를 인자로 넘기도록 시그니처 변경)
+
+[ 상태 ]
+완료, 검증됨. 자세한 디버깅 과정은 debug_logs/(2026-07-12)_optuna_속도_개선.txt
+================================================================
