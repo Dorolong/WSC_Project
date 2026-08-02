@@ -28,8 +28,15 @@ mpc_default_params = {
 # 속도 제한 데이터
 
 
-def mpc_speed(step, params):
-    
+def mpc_speed(step, params, const):
+
+    # 설정값 선언 (호출자의 cfg에서 옴 - 세션별로 독립적, simpara는
+    # 다이얼로그가 안 건드리는 값이라 계속 전역 참조해도 안전함)
+    solar = const["solar"]
+    pack  = const["pack"]
+    race  = const["race"]
+    drive = const["drive"]
+
     # 차량 헤딩 기준 풍향/속 결정
     headwind = step["wind_speed"] * m.cos(m.radians(step["wind_direction"] - step["vehicle_heading"]))
 

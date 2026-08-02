@@ -32,6 +32,17 @@ supabase = st.session_state.supabase
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# 차량 제원(physics/solar/cell/pack/power/drive/race) 묶음: 세션별로 독립된
+# 인스턴스로 만들어서 st.session_state에 보관. 예전엔 Configs.Vehicle_Params의
+# 전역 싱글턴(physics 등)을 "차량 제원 설정" 다이얼로그가 직접 수정했는데,
+# Streamlit Cloud는 여러 사용자가 같은 서버 프로세스를 공유하는 구조라 그
+# 수정이 그 순간 접속 중인 모든 사용자에게 그대로 반영되는 버그였음
+# (한 사용자가 값을 바꾸면 다른 사용자의 시뮬레이션 결과도 바뀜). 이제
+# run_simulation()이 cfg를 인자로 받아 사용하므로, 세션마다 독립된 cfg를
+# 쓰면 서로 영향을 안 줌.
+if "cfg" not in st.session_state:
+    st.session_state.cfg = build_default_cfg()
+
 try:
     study = optuna.load_study(
         study_name="WSC_MPC_Opt",
@@ -49,8 +60,17 @@ if "sim_running" not in st.session_state:
     st.session_state.sim_running = False
 
 # 차량 제원 팝업 (제목 옆 버튼에서 호출하므로 먼저 정의)
+# 아래에서 읽고 쓰는 physics/solar/cell/pack/power/drive/race는 전부
+# st.session_state.cfg(이 세션 전용 인스턴스)에서 옴 - Configs.Vehicle_Params의
+# 전역 싱글턴을 여기서 직접 참조/수정하지 않음(수정하면 다른 사용자에게도
+# 영향을 주는 버그였음, 위 st.session_state.cfg 초기화 주석 참고).
 @st.dialog("차량 제원 설정")
 def vehicle_settings_dialog():
+    cfg = st.session_state.cfg
+    physics, solar, cell, pack, power, drive, race = (
+        cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race
+    )
+
     tab_physics, tab_solar, tab_cell, tab_pack, tab_power, tab_drive, tab_race, tab_ocv = st.tabs(
         ["물리 제원", "태양광 패널", "배터리 셀", "배터리 팩", "전력 시스템", "구동계", "레이스 설정", "OCV 테이블"]
     )
@@ -389,7 +409,7 @@ if st.session_state.sim_running:
         else:
             eta_text.caption("Estimated Time Left: calculating...")
 
-    df, reason = run_simulation(params, route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limits_dists, speed_limits_vals, progress_cb=update_progress)
+    df, reason = run_simulation(params, route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limits_dists, speed_limits_vals, st.session_state.cfg, progress_cb=update_progress)
     eta_text.empty()
     pct_text.empty()
     st.session_state.sim_running = False
@@ -497,7 +517,7 @@ if st.session_state.last_df is not None:
             fig.add_vline(x=x, line_dash="dash", line_color="gray",
                           line_width=1, row=r, col=1)
 
-    for cs_dist in race.Control_Stop_2025.keys():
+    for cs_dist in st.session_state.cfg.race.Control_Stop_2025.keys():
         idx = (df["dist"] - cs_dist).abs().idxmin()
         soc_val = df.loc[idx, "soc"]
 
@@ -536,7 +556,7 @@ if st.session_state.last_df is not None:
                     supabase.table("simulation_runs").insert({
                         "user_id":          st.session_state.user.id,
                         "params":           params,
-                        "completion_ratio": float(df["dist"].max() / race.total_distance),
+                        "completion_ratio": float(df["dist"].max() / st.session_state.cfg.race.total_distance),
                         "avg_speed_kmh":    float(df["v"].mean() * 3.6),
                         "final_soc":        float(df["soc"].min()),
                         "final_dist_m":     float(df["dist"].max()),

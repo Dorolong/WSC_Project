@@ -10,7 +10,14 @@ import optuna
 
 from Functions.Vehicle_Function import read_path, run_simulation
 from mpc.mpc_controller import mpc_default_params
-from Configs.Vehicle_Params import race
+from Configs.Vehicle_Params import build_default_cfg
+
+# 차량 제원(physics/solar/cell/pack/power/drive/race) 묶음. CLI 스크립트라
+# 세션 개념은 없지만, run_simulation()이 이제 cfg를 인자로 요구하는 구조로
+# 바뀌어서(전역 싱글턴 대신 - app.py의 멀티유저 격리 문제 수정, progress
+# 참고) 여기서도 동일하게 cfg를 만들어 넘겨줌.
+cfg = build_default_cfg()
+race = cfg.race
 
 # 데이터 가져오기
 route = read_path("2027 BWSC TRACK.csv")
@@ -107,7 +114,7 @@ def objective(trial):
     # 고정된 K개 날씨 전부에 대해 평가 후 평균 (common random numbers)
     scores = []
     for env_dict_k in env_dicts_fixed:
-        df, _reason = run_simulation(params, route_np, env_dict_k, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limit_dists, speed_limit_vals, progress_cb=None)
+        df, _reason = run_simulation(params, route_np, env_dict_k, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limit_dists, speed_limit_vals, cfg, progress_cb=None)
         race_ratio = df["dist"].max() / race.total_distance
         # 완주 시 속도로 목적 값 반환, 미완주 시 ratio-2 [-1, -2] 클리핑
         if df["dist"].max() >= race.total_distance:
@@ -135,7 +142,7 @@ print("Best Value:", study.best_value)
 print("Best params:", study.best_params)
 
 best_params = {**mpc_default_params, **study.best_params}
-df, reason = run_simulation(best_params, route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limit_dists, speed_limit_vals, progress_cb=None)
+df, reason = run_simulation(best_params, route_np, env_dict, dist_vals, nearest_map, rad_max, light_dists, light_types, speed_limit_dists, speed_limit_vals, cfg, progress_cb=None)
 print("종료 사유:", reason)
 df.to_csv("outputs/Optuna_result.csv", index=False)
 

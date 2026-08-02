@@ -36,13 +36,18 @@ from mpc.mpc_controller import *
 # physics, solar, cell, pack, power, race, simpara
 from Configs.Vehicle_Params import *
 
-def cal_drive_res(step, dt, wind_spd, wind_dir, car_dir):     # [W]
-    
+def cal_drive_res(step, dt, wind_spd, wind_dir, car_dir, const):     # [W]
+
     # 변수 선언
     v           = step["v"]
     prev_v      = step["prev_v"]
     theta       = step["theta"]
     a           = (v - prev_v) / dt if dt > 0 else 0.0
+
+    # 설정값 선언 (호출자의 cfg에서 옴 - 세션별로 독립적)
+    physics = const["physics"]
+    drive   = const["drive"]
+    power   = const["power"]
 
     # 풍향 고려
     angle_diff = wind_dir - car_dir
@@ -72,18 +77,25 @@ def cal_drive_res(step, dt, wind_spd, wind_dir, car_dir):     # [W]
     
     return P_batt, a
 
-def gen_solar(shortwave_radiation):
-    
+def gen_solar(shortwave_radiation, const):
+
+    # 설정값 선언
+    solar = const["solar"]
+
     # Solar Power
     P_gen = shortwave_radiation * solar.A_Solar * solar.Solar_eff   #[W]
-    
+
     return P_gen
 
-def update_soc(soc, step, dt):
-    
+def update_soc(soc, step, dt, const):
+
     # 변수 선언
     P_batt      = step["P_batt"]
     P_gen       = step["P_gen"]
+
+    # 설정값 선언
+    cell = const["cell"]
+    pack = const["pack"]
 
     # 셀/팩 전압 추정
     V_cell = np.interp(soc, cell.ocv_soc, cell.ocv_V)
@@ -123,14 +135,16 @@ def cs_arrive(curr_dist, control_stops, visited_cs):
             return cs_dist
     return None
 
-def cs_stop_time_cal(soc):
+def cs_stop_time_cal(soc, const):
+    race = const["race"]
     Comp_const = race.cs_stop_max - race.cs_stop_min
     cs_stop = race.cs_stop_max - soc * Comp_const
     return cs_stop
 
-def cs_stop_simulation(soc, Accum_s, nearest_diff, env_data):
+def cs_stop_simulation(soc, Accum_s, nearest_diff, env_data, const):
+    power = const["power"]
     stop_time = 0
-    cs_stop = cs_stop_time_cal(soc)
+    cs_stop = cs_stop_time_cal(soc, const)
     dt_cs = 300     # 5분 단위
     while stop_time < cs_stop:
         dt_stop = min(dt_cs, cs_stop - stop_time)
@@ -140,9 +154,9 @@ def cs_stop_simulation(soc, Accum_s, nearest_diff, env_data):
 
         env_cs = env_data.get((nearest_diff, DY, HR))
         if env_cs is not None:
-            P_gen_cs = gen_solar(env_cs["shortwave_radiation"])
+            P_gen_cs = gen_solar(env_cs["shortwave_radiation"], const)
             P_gen_cs_real = P_gen_cs * power.cs_chg_eff
-            soc, _ = update_soc(soc, {"P_batt": power.P_LV_chg, "P_gen": P_gen_cs_real}, dt_stop)
+            soc, _ = update_soc(soc, {"P_batt": power.P_LV_chg, "P_gen": P_gen_cs_real}, dt_stop, const)
         else:
             break
 
@@ -230,6 +244,7 @@ def compute_lookahead(step, const):
     route_dist          = const["route_dist"]       # 20m로 나눈 루트 정보
     route_slope         = const["route_slope"]      # 루트 경사율
     n                   = const["n"]                # 총 인덱스 개수
+    race                = const["race"]              # 레이스 설정
 
     # N 포인트 앞의 발전량 가중 평균
     target_spacing_km = 70                          # [km/h]
@@ -272,7 +287,7 @@ def compute_lookahead(step, const):
 
     return avg_gen_ratio, slope_ahead
 
-def compute_required_pace(step):
+def compute_required_pace(step, const):
 
     # 변수 선언
     curr_dist       = step["curr_dist"]
@@ -281,6 +296,9 @@ def compute_required_pace(step):
     next_cs         = step["next_cs"]
     remaining_dist  = step["remaining_dist"]
 
+    # 설정값 선언
+    race  = const["race"]
+    drive = const["drive"]
 
     # 남은 주행 최적 페이스 도출(전체/다음CS)
     remaining_race_dist = (race.total_distance - curr_dist) / 1000
@@ -295,11 +313,14 @@ def compute_required_pace(step):
 
     return required_race_pace, required_next_cs_pace
 
-def compute_motor_derating(step):
+def compute_motor_derating(step, const):
 
     # 변수 선언
     prev_v          = step["prev_v"]
     prev_V_terminal = step["prev_V_terminal"]
+
+    # 설정값 선언
+    drive = const["drive"]
 
     # 전압 디레이팅 반영
     omega_wheel = prev_v / drive.wheel_radius
@@ -336,7 +357,10 @@ def calender_handler(Accum_s):
     
     return {"Action": "Go", "Accum_s": Accum_s, "DY": DY, "HR": HR, "total_s": total_s}
 
-def control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data):
+def control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data, const):
+
+    # 설정값 선언
+    race = const["race"]
 
     # Control Stop 정차 확인
     cs_hit = cs_arrive(step["curr_dist"], race.Control_Stop_2025, visited_cs)
@@ -357,7 +381,7 @@ def control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, 
     if leg_time_hr > 0 and (leg_dist_goto / leg_time_hr) < race.min_leg_avg_speed:
         return {"Action": "Fail", "reason": f"{race.Control_Stop_2025[cs_hit]} 구간 평균속도({race.min_leg_avg_speed:.0f}km/h) 미달"}
 
-    Accum_s, soc = cs_stop_simulation(soc, Accum_s, nearest_diff, env_data)
+    Accum_s, soc = cs_stop_simulation(soc, Accum_s, nearest_diff, env_data, const)
     total_s = 8 * 3600 + Accum_s
     DY = 23 + int(total_s // 86400)
     HR = int((total_s % 86400) / 3600)
@@ -372,7 +396,7 @@ def control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, 
         "DY": DY, "HR": HR, "total_s": total_s,
         "last_cs_dist": last_cs_dist, "last_cs_time": last_cs_time}
 
-def compute_vehicle_energy(step, soc, env_row, dt):
+def compute_vehicle_energy(step, soc, env_row, dt, const):
 
     # 차량 헤딩 방향 [deg]
     vehicle_heading = cal_route_vector(step)
@@ -382,13 +406,13 @@ def compute_vehicle_energy(step, soc, env_row, dt):
         step, dt,
         env_row["wind_speed_10m"],
         env_row["wind_direction_10m"],
-        vehicle_heading)
+        vehicle_heading, const)
 
     # PV 발전량
-    step["P_gen"] = gen_solar(env_row["shortwave_radiation"])
+    step["P_gen"] = gen_solar(env_row["shortwave_radiation"], const)
 
     # SOC Update
-    soc, V_terminal = update_soc(soc, step, dt)
+    soc, V_terminal = update_soc(soc, step, dt, const)
     prev_V_terminal = V_terminal
     step["P_net"] = step["P_gen"] - step["P_batt"]
 
@@ -419,8 +443,19 @@ def compute_speed_limit(step, const):
     idx = max(idx, 0)
     return speed_limit_vals[idx]
 
-def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, light_dists, light_types, 
-                   speed_limit_dists, speed_limit_vals, progress_cb=None):
+def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, light_dists, light_types,
+                   speed_limit_dists, speed_limit_vals, cfg, progress_cb=None):
+
+    # 차량 설정값 - 호출자가 넘긴 cfg(세션/호출별 독립 인스턴스)에서 꺼내 씀.
+    # 모듈 전역 physics/solar/... 싱글턴을 여기서 직접 참조하지 않는 이유:
+    # Streamlit처럼 여러 사용자가 한 서버 프로세스를 공유하는 환경에서 전역
+    # 싱글턴을 직접 mutate하면(예: 차량 제원 설정 다이얼로그) 그 순간 다른
+    # 모든 사용자의 시뮬레이션에도 영향을 주는 버그가 됨. cfg는 사용자마다
+    # (app.py의 st.session_state.cfg) 독립적으로 만들어짐 - Configs.Vehicle_Params
+    # .build_default_cfg() 참고.
+    physics, solar, cell, pack, power, drive, race = (
+        cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race
+    )
 
     # 인자 생성
     i                   = 1
@@ -467,6 +502,13 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
         n                   = n,
         speed_limit_dists   = speed_limit_dists,
         speed_limit_vals    = speed_limit_vals,
+        physics             = physics,
+        solar               = solar,
+        cell                = cell,
+        pack                = pack,
+        power               = power,
+        drive               = drive,
+        race                = race,
         )
 
     while i < n:
@@ -510,16 +552,16 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
         step["avg_gen_ratio"], step["slope_ahead"] = compute_lookahead(step, const)
 
         # 남은 주행 최적 페이스 도출(전체/다음CS)
-        step["required_race_pace"], step["required_next_cs_pace"] = compute_required_pace(step)
-        
+        step["required_race_pace"], step["required_next_cs_pace"] = compute_required_pace(step, const)
+
         # 모터 속도 Derating 반영
-        step["v_max_derated"] = compute_motor_derating(step)
+        step["v_max_derated"] = compute_motor_derating(step, const)
 
         # 법정 제한속도 반영
         step["speed_limit"] = compute_speed_limit(step, const)
 
         # 속도 업데이트
-        step["v"] = mpc_speed(step, params)
+        step["v"] = mpc_speed(step, params, const)
         prev_v = step["v"]
 
         # 구간 Delta Time [s]
@@ -543,7 +585,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
         # route 데이터를 10k resolution 데이터로 치환
         nearest_diff = nearest_map[step["curr_dist"]]
 
-        cs_stop_result = control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data)
+        cs_stop_result = control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data, const)
         if cs_stop_result["Action"] == "Fail":
             termination_reason = cs_stop_result.get("reason", "컨트롤스탑 실격")
             break
@@ -587,7 +629,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
         prev_radiation_std = env_row["shortwave_radiation_std"]
         
         # 차량 에너지 계산
-        soc, prev_V_terminal, prev_wind_speed, prev_wind_dir, prev_heading = compute_vehicle_energy(step, soc, env_row, dt)
+        soc, prev_V_terminal, prev_wind_speed, prev_wind_dir, prev_heading = compute_vehicle_energy(step, soc, env_row, dt, const)
         prev_a = step["a"]
 
         # 진척율 표시

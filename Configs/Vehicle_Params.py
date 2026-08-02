@@ -3,6 +3,7 @@
 """
 
 from dataclasses import dataclass, field    # 구조체 선언용
+from types import SimpleNamespace           # cfg 번들용
 import numpy as np                          # numpy
 
 # Vehicle Physics
@@ -190,6 +191,31 @@ class SimulationParameter:
     avg_traffic_light_delay:    int = 15            # [s], 신호등 평균 대기시간
     avg_pedestrian_light_delay: int = 10            # [s], 보행자 신호 평균 대기시간
     decel_brake:                float = 0.7         # [g], Control Stop 진입 위한 감속도
+
+def build_default_cfg():
+    """
+    physics/solar/cell/pack/power/drive/race를 새 인스턴스로 묶어서 반환.
+    모듈 전역 싱글턴(physics, solar, ... 아래)과 달리 호출할 때마다 완전히
+    독립된 새 객체라서, Streamlit처럼 여러 사용자가 한 서버 프로세스를
+    공유하는 환경에서 세션별로(st.session_state.cfg) 만들어 쓰면 한 사용자가
+    "차량 제원 설정"을 바꿔도 다른 사용자에게 영향이 안 감(전역 싱글턴을
+    직접 mutate하던 예전 방식은 모든 사용자에게 그대로 반영되는 버그였음).
+    run_simulation()이 이 cfg를 인자로 받아 내부에서 physics/pack/... 등을
+    지역 변수로 꺼내 쓰는 식으로 사용.
+    """
+    _physics = VehiclePhysics()
+    _solar   = SolarPanel()
+    _cell    = BatteryCell()
+    _pack    = BatteryPack()
+    _pack.Cell = _cell       # pack 자체 Cell 복사본 대신 이 cfg의 cell을 참조 (전역 버전과 동일한 이유)
+    _pack.__post_init__()    # cell 참조 변경에 맞춰 파생값 재계산
+    _power   = PowerSystem()
+    _drive   = Drivesystem()
+    _race    = RaceConfig()
+    return SimpleNamespace(
+        physics=_physics, solar=_solar, cell=_cell, pack=_pack,
+        power=_power, drive=_drive, race=_race,
+    )
 
 physics = VehiclePhysics()
 solar   = SolarPanel()
