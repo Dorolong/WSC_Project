@@ -262,6 +262,11 @@ with st.sidebar:
                 )
                 if records.data:
                     hist_df = pd.DataFrame(records.data)
+                    hist_df["created_at"] = (
+                        pd.to_datetime(hist_df["created_at"])
+                        .dt.tz_convert("Asia/Seoul")
+                        .dt.strftime("%y.%m.%d %H:%M")
+                    )
                     hist_df["completion_ratio"] = (hist_df["completion_ratio"] * 100).round(1)
                     hist_df.columns = ["일시", "완주율(%)", "평균속도(km/h)", "최저 SOC", "도달거리(m)"]
                     st.dataframe(hist_df, hide_index=True, use_container_width=True)
@@ -316,8 +321,18 @@ def route_animator(duration_sec=None, final_lon=None, final_lat=None, key=None):
         kwargs["duration_sec"] = duration_sec or 20
     return _route_animator(**kwargs)
 
-# 실행 버튼
-if st.button("시뮬레이션 실행", type="primary", disabled=st.session_state.sim_running):
+# 결과 저장 상태 (버튼 클릭으로 인한 rerun에도 결과 화면이 유지되도록 session_state에 보관)
+if "last_df" not in st.session_state:
+    st.session_state.last_df = None
+    st.session_state.last_params = None
+    st.session_state.last_final_pos = None
+    st.session_state.last_saved = False
+
+# 실행 버튼 (로그인해야 실행 가능)
+if st.session_state.user is None:
+    st.info("시뮬레이션을 실행하려면 로그인이 필요합니다.")
+if st.button("시뮬레이션 실행", type="primary",
+             disabled=st.session_state.sim_running or st.session_state.user is None):
     st.session_state.sim_running = True
     st.rerun()
 
@@ -351,26 +366,28 @@ if st.session_state.sim_running:
     pct_text.empty()
     st.session_state.sim_running = False
 
-    # 로그인 상태면 결과를 Supabase에 기록 (비로그인 시 저장 없이 결과만 표시)
-    if st.session_state.user is not None:
-        try:
-            supabase.table("simulation_runs").insert({
-                "user_id":          st.session_state.user.id,
-                "params":           params,
-                "completion_ratio": float(df["dist"].max() / race.total_distance),
-                "avg_speed_kmh":    float(df["v"].mean() * 3.6),
-                "final_soc":        float(df["soc"].min()),
-                "final_dist_m":     float(df["dist"].max()),
-            }).execute()
-        except Exception as e:
-            st.warning(f"기록 저장 실패: {e}")
-
     # 계산 완료 -> 실제 도달 지점까지 애니메이션 없이 즉시 반영 (완주 실패 시 그 지점에서 멈춤)
     route_dist_arr = route_np["dist"]
     _final_idx = int(np.searchsorted(route_dist_arr, df["dist"].max()))
     _final_idx = min(_final_idx, len(route_dist_arr) - 1)
     _final_lon = route_np["lon"][:_final_idx + 1:5].tolist() + [float(route_np["lon"][_final_idx])]
     _final_lat = route_np["lat"][:_final_idx + 1:5].tolist() + [float(route_np["lat"][_final_idx])]
+
+    # 결과를 session_state에 보관 후 rerun -> 아래 "결과 표시" 블록이 그 결과를 그리고,
+    # 이후 CSV/서버 저장 버튼 클릭으로 다시 rerun이 일어나도 결과 화면이 사라지지 않음
+    st.session_state.last_df = df
+    st.session_state.last_params = params
+    st.session_state.last_final_pos = (_final_lon, _final_lat)
+    st.session_state.last_saved = False
+    st.rerun()
+
+if st.session_state.last_df is not None:
+    df = st.session_state.last_df
+    params = st.session_state.last_params
+    _final_lon, _final_lat = st.session_state.last_final_pos
+
+    st.subheader("경로 진행 상황")
+    anim_placeholder = st.empty()
     with anim_placeholder.container():
         route_animator(final_lon=_final_lon, final_lat=_final_lat)
 
@@ -439,9 +456,31 @@ if st.session_state.sim_running:
     fig.update_layout(height=800, showlegend=True)
     st.plotly_chart(fig, use_container_width=True)
 
-    st.download_button(
-    label="CSV 저장",
-    data=df.to_csv(index=False),
-    file_name="sim_result.csv",
-    mime="text/csv"
-    )
+    col_dl, col_save = st.columns(2)
+    with col_dl:
+        st.download_button(
+            label="CSV 저장",
+            data=df.to_csv(index=False),
+            file_name="sim_result.csv",
+            mime="text/csv"
+        )
+    with col_save:
+        if st.session_state.user is None:
+            st.caption("로그인하면 결과를 서버에 저장할 수 있어요.")
+        elif st.session_state.last_saved:
+            st.success("서버에 저장됨")
+        else:
+            if st.button("결과 서버에 저장"):
+                try:
+                    supabase.table("simulation_runs").insert({
+                        "user_id":          st.session_state.user.id,
+                        "params":           params,
+                        "completion_ratio": float(df["dist"].max() / race.total_distance),
+                        "avg_speed_kmh":    float(df["v"].mean() * 3.6),
+                        "final_soc":        float(df["soc"].min()),
+                        "final_dist_m":     float(df["dist"].max()),
+                    }).execute()
+                    st.session_state.last_saved = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"저장 실패: {e}")
