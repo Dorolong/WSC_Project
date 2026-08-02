@@ -259,6 +259,24 @@ with st.sidebar:
             st.session_state.user = None
             st.rerun()
 
+        with st.expander("닉네임 수정"):
+            new_nickname = st.text_input(
+                "새 닉네임",
+                value=st.session_state.user.user_metadata.get("nickname", ""),
+                key="edit_nickname"
+            )
+            if st.button("변경", key="update_nickname_btn"):
+                if not new_nickname.strip():
+                    st.error("닉네임을 입력해주세요.")
+                else:
+                    try:
+                        res = supabase.auth.update_user({"data": {"nickname": new_nickname.strip()}})
+                        st.session_state.user = res.user
+                        st.success("닉네임이 변경됐습니다.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"변경 실패: {e}")
+
         with st.expander("내 시뮬레이션 기록"):
             try:
                 records = (
