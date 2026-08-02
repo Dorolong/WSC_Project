@@ -162,7 +162,7 @@ compute_downhill_cap(step, const): 내리막 세그먼트 진입 전 목표
   이상 시 확인 지점.
 - 속도 정수(int) 출력: 내부 계산은 float 유지, results.append()
   시점에만 반올림하기로 결정됐으나 **아직 코드 미반영**
-  (progress/29 백로그 참고).
+  (progress/31 백로그 참고).
 - **control_stop_handler()의 리팩터링 전후 A/B 비교 검증 완료**
   (progress/19, 도달거리 차이 0.1% 확인).
 - **light_arrive() 단위 불일치 버그** (미터 vs km) - progress/20
@@ -197,5 +197,5 @@ simpara.a 동적화 + LV2 momentum 결합 완료(progress/08 참고). 실제
 완료, 실제 활용 로직(compute_downhill_cap, CS 코스팅/제동)은 설계만
 되고 코드는 없음(progress/22, 다음 세션 최우선 작업). 종료 사유
 추적(termination_reason) 반영 완료(progress/26). 최신 백로그는
-progress/29 참고.
+progress/31 참고.
 ================================================================
