@@ -353,29 +353,26 @@ def vehicle_settings_dialog():
 if st.session_state.user is not None and not st.session_state.user.user_metadata.get("tutorial_seen"):
     tutorial_dialog()
 
-# 페이지 제목 + 버전/릴리즈노트 + 차량 제원 설정 버튼 (Streamlit 기본 Stop 컨트롤이 뜨는 우측 상단 근처)
+# 페이지 제목 + 버전/릴리즈노트 (Streamlit 기본 Stop 컨트롤이 뜨는 우측 상단 근처)
 # 참고: 이 위치가 Streamlit 앱 콘텐츠 영역에서 사용 가능한 가장 위쪽 자리.
 # 화면 우측 상단의 Share/GitHub/Manage app 등은 Streamlit Cloud가 앱
 # iframe 바깥에 그리는 플랫폼 UI라서, 앱 코드(Python)로는 그 툴바 안에
 # 버튼을 끼워넣거나 위치를 옮길 수 없음.
-title_col, version_col, btn_col = st.columns([5, 1.3, 1])
+title_col, version_col = st.columns([6, 1.4])
 with title_col:
     st.title("2027 WSC Drive Simulator")
 with version_col:
     st.write("")
     st.write("")
-    v_col, note_col = st.columns([1, 1.7])
+    # gap="small" + use_container_width=False(기본값)로 캡션·버튼을
+    # 서로 붙여서 배치(버튼이 컬럼 폭만큼 안 늘어나 텍스트 크기에 맞게 작게 나옴)
+    v_col, note_col = st.columns([1, 1.4], gap="small")
     with v_col:
         st.write("")
         st.caption(f"v{APP_VERSION}")
     with note_col:
-        if st.button("Release note", use_container_width=True):
+        if st.button("Release note"):
             release_notes_dialog()
-with btn_col:
-    st.write("")
-    st.write("")
-    if st.button("차량 제원 설정", disabled=st.session_state.sim_running):
-        vehicle_settings_dialog()
 
 # 캐시
 @st.cache_data
@@ -572,13 +569,18 @@ if "last_df" not in st.session_state:
     st.session_state.last_final_pos = None
     st.session_state.last_saved = False
 
-# 실행 버튼 (로그인해야 실행 가능)
+# 실행 버튼 + 차량 제원 설정 버튼 (로그인해야 실행 가능)
 if st.session_state.user is None:
     st.info("시뮬레이션을 실행하려면 로그인이 필요합니다.")
-if st.button("시뮬레이션 실행", type="primary",
-             disabled=st.session_state.sim_running or st.session_state.user is None):
-    st.session_state.sim_running = True
-    st.rerun()
+run_col, settings_col = st.columns([1, 1], gap="small")
+with run_col:
+    if st.button("시뮬레이션 실행", type="primary",
+                 disabled=st.session_state.sim_running or st.session_state.user is None):
+        st.session_state.sim_running = True
+        st.rerun()
+with settings_col:
+    if st.button("차량 제원 설정", disabled=st.session_state.sim_running):
+        vehicle_settings_dialog()
 
 if st.session_state.sim_running:
     params = {**best_params}
