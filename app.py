@@ -96,6 +96,96 @@ st.set_page_config(page_title="WSC Drive Simulator", layout="wide")
 if "sim_running" not in st.session_state:
     st.session_state.sim_running = False
 
+# 릴리즈 노트: 새 버전이 나올 때마다 맨 위(리스트 맨 앞)에 새 항목을
+# 추가하고 APP_VERSION을 그 버전으로 올린다. 파일로 따로 안 두고 코드에
+# 데이터로 두는 이유는 사용자 요청대로 "제목만 각각 버튼(펼치기)이면
+# 충분"한 가벼운 용도이기 때문 - 내부 개발 이력은 progress/, debug_logs/
+# 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
+RELEASE_NOTES = [
+    {
+        "version": "1.0.6",
+        "date": "2026-08-02",
+        "title": "릴리즈 노트 · 첫 로그인 튜토리얼 추가",
+        "details": "- 현재 버전과 업데이트 이력을 앱에서 바로 확인할 수 있는 릴리즈 노트 추가\n"
+                    "- 처음 로그인한 사용자에게 사용법 안내 팝업 표시(한 번 확인하면 다시 안 뜸)",
+    },
+    {
+        "version": "1.0.5",
+        "date": "2026-08-02",
+        "title": "차량 제원 설정 화면 UI 개선",
+        "details": "- '적용' / '적용 후 계정에 저장'으로 나뉘어 있던 버튼을 '적용' 버튼 + "
+                    "'계정에도 저장' 체크박스로 통합\n"
+                    "- '마지막 저장값 불러오기' 버튼을 설정 화면 맨 위로 이동",
+    },
+    {
+        "version": "1.0.4",
+        "date": "2026-08-02",
+        "title": "차량 제원 설정 저장/불러오기 기능 추가",
+        "details": "- 차량 제원 설정을 계정에 저장하고, 다음 로그인 시 마지막 설정을 그대로 불러오는 기능 추가\n"
+                    "- 지난 시뮬레이션 기록에서 '이 설정 불러오기'로 그때 사용했던 차량 제원을 바로 복원 가능",
+    },
+    {
+        "version": "1.0.3",
+        "date": "2026-08-02",
+        "title": "차량 제원 설정이 계정별로 독립 적용되도록 수정",
+        "details": "- (버그 수정) 한 사용자가 차량 제원을 변경하면 그 순간 접속 중인 다른 모든 "
+                    "사용자의 시뮬레이션에도 영향을 주던 문제를 수정\n"
+                    "- 이제 차량 제원 변경은 본인 계정/세션에만 적용됨",
+    },
+    {
+        "version": "1.0.2",
+        "date": "2026-08-02",
+        "title": "완주 실패 원인 분석 패널 추가",
+        "details": "- 시뮬레이션이 완주하지 못했을 때 원인(배터리 SOC 부족, 체크포인트 마감시각 초과, "
+                    "구간 평균속도 미달 등)을 결과 화면에서 바로 확인 가능",
+    },
+    {
+        "version": "1.0.1",
+        "date": "2026-08-02",
+        "title": "로그인 및 시뮬레이션 기록 저장 기능 추가",
+        "details": "- 로그인/회원가입(닉네임 포함) 기능 추가\n"
+                    "- 시뮬레이션 결과를 계정에 저장하고, 지난 기록을 사이드바에서 조회 가능",
+    },
+    {
+        "version": "1.0.0",
+        "date": "2026-08-02",
+        "title": "첫 배포",
+        "details": "- WSC 주행효율 예측 MPC 시뮬레이터 첫 공개 배포\n"
+                    "- 경로 지도, 시뮬레이션 실행, 결과 그래프/지표 확인 기능 제공",
+    },
+]
+APP_VERSION = RELEASE_NOTES[0]["version"]
+
+@st.dialog("릴리즈 노트")
+def release_notes_dialog():
+    for note in RELEASE_NOTES:
+        with st.expander(f"v{note['version']} · {note['date']} · {note['title']}"):
+            st.markdown(note["details"])
+
+# 첫 로그인 사용자를 위한 사용법 안내 팝업. 한 번 확인하면 Supabase
+# user_metadata에 tutorial_seen=True로 남겨서(닉네임과 같은 방식) 다음부터는
+# 다시 안 뜨게 함 - 세션(session_state)이 아니라 계정에 남기는 이유는
+# 새로고침/재로그인해도 계속 유지돼야 하기 때문.
+@st.dialog("사용법 안내")
+def tutorial_dialog():
+    st.markdown(
+        "**환영합니다! 간단히 사용법을 안내해드릴게요.**\n\n"
+        "1. 상단 **'차량 제원 설정'** 버튼에서 차량 물리 제원을 조정할 수 있어요. "
+        "(로그인 후 계정에 저장/불러오기도 가능)\n"
+        "2. **'시뮬레이션 실행'** 버튼을 누르면 완주 시뮬레이션이 진행돼요.\n"
+        "3. 시뮬레이션이 끝나면 결과 그래프와 함께, 완주하지 못했을 경우 원인 분석도 확인할 수 있어요.\n"
+        "4. **'결과 서버에 저장'**을 누르면 이 기록이 계정에 남고, 사이드바 "
+        "**'내 시뮬레이션 기록'**에서 다시 확인하거나 그때 설정을 불러올 수 있어요.\n\n"
+        "궁금한 점은 상단 **'릴리즈 노트'** 버튼에서 그동안의 업데이트 내역도 확인해보세요."
+    )
+    if st.button("확인했습니다", type="primary", use_container_width=True):
+        try:
+            res = supabase.auth.update_user({"data": {"tutorial_seen": True}})
+            st.session_state.user = res.user
+        except Exception:
+            pass
+        st.rerun()
+
 # 차량 제원 팝업 (제목 옆 버튼에서 호출하므로 먼저 정의)
 # 아래에서 읽고 쓰는 physics/solar/cell/pack/power/drive/race는 전부
 # st.session_state.cfg(이 세션 전용 인스턴스)에서 옴 - Configs.Vehicle_Params의
@@ -257,10 +347,21 @@ def vehicle_settings_dialog():
 
         st.rerun()
 
-# 페이지 제목 + 차량 제원 설정 버튼 (Streamlit 기본 Stop 컨트롤이 뜨는 우측 상단 근처)
-title_col, btn_col = st.columns([6, 1])
+# 첫 로그인 사용자 튜토리얼 팝업: 계정에 tutorial_seen 플래그가 없으면 표시.
+# 로그인 버튼의 st.rerun() 직후 스크립트가 처음부터 다시 실행될 때 여기서
+# 걸리므로, 로그인 처리 코드 안이 아니라 메인 흐름 쪽에 둠.
+if st.session_state.user is not None and not st.session_state.user.user_metadata.get("tutorial_seen"):
+    tutorial_dialog()
+
+# 페이지 제목 + 버전/릴리즈노트 + 차량 제원 설정 버튼 (Streamlit 기본 Stop 컨트롤이 뜨는 우측 상단 근처)
+title_col, version_col, btn_col = st.columns([5, 1.2, 1])
 with title_col:
     st.title("2027 WSC Drive Simulator")
+with version_col:
+    st.write("")
+    st.caption(f"v{APP_VERSION}")
+    if st.button("릴리즈 노트", use_container_width=True):
+        release_notes_dialog()
 with btn_col:
     st.write("")
     st.write("")
