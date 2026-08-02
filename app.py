@@ -365,8 +365,12 @@ with version_col:
     st.write("")
     st.write("")
     # gap="small" + use_container_width=False(기본값)로 캡션·버튼을
-    # 서로 붙여서 배치(버튼이 컬럼 폭만큼 안 늘어나 텍스트 크기에 맞게 작게 나옴)
-    v_col, note_col = st.columns([1, 1.4], gap="small")
+    # 서로 붙여서 배치(버튼이 컬럼 폭만큼 안 늘어나 텍스트 크기에 맞게 작게 나옴).
+    # 뒤에 넓은 더미 컬럼(_spacer)을 하나 더 둬서 앞의 두 컬럼(v_col/note_col)이
+    # 차지하는 실제 폭 자체를 좁혀 캡션-버튼 간 여백을 줄임(Streamlit 컬럼은
+    # 내용에 맞춰 자동으로 좁아지지 않고 배정된 비율만큼 폭을 다 차지하므로,
+    # 남는 공간을 뒤쪽 더미 컬럼이 흡수하게 하는 방식).
+    v_col, note_col, _spacer = st.columns([1, 1.6, 3], gap="small")
     with v_col:
         st.write("")
         st.caption(f"v{APP_VERSION}")
@@ -572,7 +576,9 @@ if "last_df" not in st.session_state:
 # 실행 버튼 + 차량 제원 설정 버튼 (로그인해야 실행 가능)
 if st.session_state.user is None:
     st.info("시뮬레이션을 실행하려면 로그인이 필요합니다.")
-run_col, settings_col = st.columns([1, 1], gap="small")
+# 뒤에 넓은 더미 컬럼(_spacer)을 둬서 두 버튼이 차지하는 실제 폭을 좁혀
+# 버튼 사이 여백을 줄임(위 버전/릴리즈노트 배치와 동일한 방식)
+run_col, settings_col, _spacer = st.columns([1.4, 1.6, 6], gap="small")
 with run_col:
     if st.button("시뮬레이션 실행", type="primary",
                  disabled=st.session_state.sim_running or st.session_state.user is None):
