@@ -453,8 +453,8 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
     # 모든 사용자의 시뮬레이션에도 영향을 주는 버그가 됨. cfg는 사용자마다
     # (app.py의 st.session_state.cfg) 독립적으로 만들어짐 - Configs.Vehicle_Params
     # .build_default_cfg() 참고.
-    physics, solar, cell, pack, power, drive, race = (
-        cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race
+    physics, solar, cell, pack, power, drive, race, simpara = (
+        cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race, cfg.simpara
     )
 
     # 인자 생성
