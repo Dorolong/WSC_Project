@@ -22,6 +22,10 @@ from Functions.Vehicle_Function import read_path, run_simulation
 from mpc.mpc_controller import mpc_default_params
 from Configs.Vehicle_Params import *
 
+# Optuna 탐색을 돌리는 오라클 서버 주소. IP가 바뀌면(인스턴스 재생성 등)
+# 여기만 고치면 돼요. 나중에 도메인을 연결하면 그 주소로 바꿔주세요.
+WSC_OPTUNA_SERVER_URL = "http://141.147.167.152:8000"
+
 # Supabase 클라이언트: st.session_state에 세션별로 저장(브라우저 세션마다 독립).
 # @st.cache_resource로 캐싱하면 서버 프로세스 전체에서 하나의 클라이언트를
 # 공유하게 되어, 로그인 시 클라이언트 내부에 저장되는 인증 세션이 다른
@@ -102,6 +106,15 @@ if "sim_running" not in st.session_state:
 # 충분"한 가벼운 용도이기 때문 - 내부 개발 이력은 progress/, debug_logs/
 # 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
 RELEASE_NOTES = [
+    {
+        "version": "1.0.7",
+        "date": "2026-08-03",
+        "title": "Optuna 탐색 서버 연동",
+        "details": "- 사이드바에 Optuna 탐색 서버(오라클) 바로가기 버튼 추가 - 같은 계정으로 로그인해서 "
+                    "MPC 파라미터 탐색(여러 trial)을 서버에서 돌릴 수 있음\n"
+                    "- '내 Optuna 탐색 결과'에서 그동안 돌린 탐색들의 진행 상황·최적값을 확인하고, "
+                    "'이 파라미터로 시뮬레이션하기'로 바로 적용 가능",
+    },
     {
         "version": "1.0.6",
         "date": "2026-08-02",
@@ -510,15 +523,60 @@ with st.sidebar:
             except Exception as e:
                 st.caption(f"기록 조회 실패: {e}")
 
+        st.link_button("🏎️ Optuna 탐색 서버로 이동", WSC_OPTUNA_SERVER_URL, use_container_width=True)
+        st.caption("같은 계정으로 로그인해서 MPC 파라미터 탐색(여러 trial)을 서버에서 돌려볼 수 있어요.")
+
+        with st.expander("내 Optuna 탐색 결과"):
+            try:
+                optuna_records = (
+                    supabase.table("optuna_runs")
+                    .select("study_name, updated_at, n_trials_completed, n_trials_target, best_value, status, best_params")
+                    .eq("user_id", st.session_state.user.id)
+                    .order("updated_at", desc=True)
+                    .limit(20)
+                    .execute()
+                )
+                if optuna_records.data:
+                    for row in optuna_records.data:
+                        updated = (
+                            pd.to_datetime(row["updated_at"])
+                            .tz_convert("Asia/Seoul")
+                            .strftime("%y.%m.%d %H:%M")
+                        )
+                        status_label = {"running": "진행 중", "done": "완료", "error": "오류"}.get(row["status"], row["status"])
+                        best_val_str = f"{row['best_value']:.2f}" if row.get("best_value") is not None else "-"
+                        st.caption(
+                            f"{updated} · {status_label} · Trial {row['n_trials_completed']}/{row['n_trials_target']} · "
+                            f"Best {best_val_str}"
+                        )
+                        if row.get("best_params"):
+                            if st.button("이 파라미터로 시뮬레이션하기", key=f"load_optuna_{row['study_name']}", use_container_width=True):
+                                st.session_state.active_best_params = {**mpc_default_params, **row["best_params"]}
+                                st.success("이 탐색 결과의 파라미터를 적용했어요. 아래 'MPC 파라미터'에서 확인하세요.")
+                                st.rerun()
+                        st.divider()
+                else:
+                    st.caption("아직 Optuna 탐색 결과가 없습니다.")
+            except Exception as e:
+                st.caption(f"탐색 결과 조회 실패: {e}")
+
     st.divider()
 
-    # MPC 파라미터 (읽기 전용, Optuna 최적값 그대로 사용)
-    st.header("MPC 파라미터 (Optuna 최적값)")
+    # MPC 파라미터 (읽기 전용) - 기본값은 레포에 커밋된 로컬 탐색 결과,
+    # 사이드바에서 "이 파라미터로 시뮬레이션하기"를 누르면 그 사용자의
+    # Optuna 탐색 결과로 세션 동안 바뀜(active_best_params).
+    active_params = st.session_state.get("active_best_params", best_params)
+    header_suffix = " (내 Optuna 탐색 결과 적용됨)" if "active_best_params" in st.session_state else " (기본값)"
+    st.header(f"MPC 파라미터{header_suffix}")
     st.dataframe(
-        pd.DataFrame(best_params.items(), columns=["파라미터", "값"]),
+        pd.DataFrame(active_params.items(), columns=["파라미터", "값"]),
         hide_index=True,
         use_container_width=True
     )
+    if "active_best_params" in st.session_state:
+        if st.button("기본값으로 되돌리기"):
+            del st.session_state.active_best_params
+            st.rerun()
 
 # 경로 지도 - 커스텀 컴포넌트 (배경/전체경로는 최초 1회만, 이후 마커+주행경로만 갱신 -> 부드러운 이동)
 _bg_lat = route_np["lat"][::5]
@@ -579,7 +637,7 @@ if st.button("차량 제원 설정", disabled=st.session_state.sim_running):
     vehicle_settings_dialog()
 
 if st.session_state.sim_running:
-    params = {**best_params}
+    params = {**st.session_state.get("active_best_params", best_params)}
 
     st.subheader("경로 진행 상황")
     anim_placeholder = st.empty()
