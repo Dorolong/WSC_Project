@@ -194,7 +194,7 @@ class SimulationParameter:
 
 def build_default_cfg():
     """
-    physics/solar/cell/pack/power/drive/race를 새 인스턴스로 묶어서 반환.
+    physics/solar/cell/pack/power/drive/race/simpara를 새 인스턴스로 묶어서 반환.
     모듈 전역 싱글턴(physics, solar, ... 아래)과 달리 호출할 때마다 완전히
     독립된 새 객체라서, Streamlit처럼 여러 사용자가 한 서버 프로세스를
     공유하는 환경에서 세션별로(st.session_state.cfg) 만들어 쓰면 한 사용자가
@@ -212,9 +212,10 @@ def build_default_cfg():
     _power   = PowerSystem()
     _drive   = Drivesystem()
     _race    = RaceConfig()
+    _simpara = SimulationParameter()
     return SimpleNamespace(
         physics=_physics, solar=_solar, cell=_cell, pack=_pack,
-        power=_power, drive=_drive, race=_race,
+        power=_power, drive=_drive, race=_race, simpara=_simpara,
     )
 
 physics = VehiclePhysics()
