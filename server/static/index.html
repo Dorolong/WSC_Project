@@ -155,6 +155,22 @@ function showApp() {
   document.getElementById('app').style.display = 'block';
   refreshStatus();
   setInterval(refreshStatus, 4000);
+  resumeMyRun();
+}
+
+async function resumeMyRun() {
+  try {
+    const res = await fetch('/api/my-active-run', { headers: apiHeaders() });
+    const data = await res.json();
+    if (!data.run_id) return;
+    myRunId = data.run_id;
+    document.getElementById('myRunCard').style.display = 'block';
+    pollMyRun();
+    if (myRunTimer) clearInterval(myRunTimer);
+    myRunTimer = setInterval(pollMyRun, 3000);
+  } catch (e) {
+    // 실패해도 조용히 무시 - 새로 "탐색 시작" 누르면 되니 화면을 막을 정도는 아님
+  }
 }
 
 document.getElementById('loginBtn').addEventListener('click', async () => {
