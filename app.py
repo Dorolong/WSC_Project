@@ -7,6 +7,7 @@ import sys
 import time
 import base64
 import dataclasses
+import requests
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
@@ -182,6 +183,52 @@ def release_notes_dialog():
     for note in RELEASE_NOTES:
         with st.expander(f"v{note['version']} · {note['date']} · {note['title']}"):
             st.markdown(note["details"])
+
+# 원본 코드 보기: GitHub raw 주소에서 그때그때 파일을 그대로 받아와서 보여줌
+# (별도 DB/사본 없이 매번 GitHub 현재 상태를 직접 조회하는 방식이라, push하면
+# 바로 반영됨 - "실시간"을 별도 동기화 장치 없이 만족). st.cache_data(ttl=30)은
+# 다이얼로그 안에서 파일 버튼 몇 번 눌러볼 때마다 매번 GitHub에 새로 요청하지
+# 않게 하는 용도일 뿐, 30초 지나면 다음 클릭에서 자동으로 다시 최신을 받아옴.
+GITHUB_REPO = "Dorolong/WSC_Project"
+GITHUB_BRANCH = "main"
+CODE_VIEWER_FILES = [
+    ("app.py", "Streamlit 메인 앱"),
+    ("Configs/Vehicle_Params.py", "차량 제원·시뮬레이션 파라미터"),
+    ("Functions/Vehicle_Function.py", "차량 물리 계산·시뮬레이션 엔진"),
+    ("mpc/mpc_controller.py", "MPC 속도 플래너"),
+    ("Environment/Open_Meteo_API.py", "기상 데이터 수집"),
+    ("scripts/main.py", "Optuna 파라미터 최적화"),
+    ("server/main.py", "Optuna 웹 런처 - 백엔드"),
+    ("server/study_runner.py", "Optuna 웹 런처 - 탐색 실행"),
+]
+
+@st.cache_data(ttl=30, show_spinner=False)
+def fetch_github_file(path):
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{path}"
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.text
+
+if "code_viewer_selected" not in st.session_state:
+    st.session_state.code_viewer_selected = None
+
+@st.dialog("원본 코드", width="large")
+def code_viewer_dialog():
+    st.caption(f"GitHub `{GITHUB_BRANCH}` 브랜치의 지금 코드를 그대로 보여줘요 (읽기 전용).")
+    for path, desc in CODE_VIEWER_FILES:
+        if st.button(f"📄 {path}", key=f"codeview_{path}", use_container_width=True, help=desc):
+            st.session_state.code_viewer_selected = path
+            st.rerun()
+
+    if st.session_state.code_viewer_selected:
+        st.divider()
+        selected = st.session_state.code_viewer_selected
+        st.markdown(f"**`{selected}`**")
+        try:
+            content = fetch_github_file(selected)
+            st.code(content, language="python", line_numbers=True, height=420)
+        except Exception as e:
+            st.error(f"불러오기 실패: {e}")
 
 # 첫 로그인 사용자를 위한 사용법 안내 팝업. 한 번 확인하면 Supabase
 # user_metadata에 tutorial_seen=True로 남겨서(닉네임과 같은 방식) 다음부터는
@@ -548,6 +595,8 @@ with st.sidebar:
 
         st.link_button("🏎️ Optuna 탐색 서버로 이동", WSC_OPTUNA_SERVER_URL, use_container_width=True)
         st.caption("같은 계정으로 로그인해서 MPC 파라미터 탐색(여러 trial)을 서버에서 돌려볼 수 있어요.")
+        if st.button("💻 코드 보기", use_container_width=True):
+            code_viewer_dialog()
 
         with st.expander("내 Optuna 탐색 결과"):
             try:
