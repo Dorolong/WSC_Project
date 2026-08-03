@@ -1,0 +1,15 @@
+[Unit]
+Description=WSC Optuna Web Launcher
+After=network.target
+
+[Service]
+Type=simple
+# 아래 두 경로를 실제 서버의 프로젝트 위치로 바꿔주세요.
+WorkingDirectory=/home/ubuntu/WSC_Project
+ExecStart=/home/ubuntu/WSC_Project/.venv/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target

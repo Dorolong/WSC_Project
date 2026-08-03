@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WSC Optuna 런처</title>
+<style>
+  :root {
+    --primary: #2F6F4E;
+    --primary-dark: #1F4D36;
+    --mint: #E3F0E8;
+    --paper: #F6F7F2;
+    --card: #FFFFFF;
+    --line: #E3E1D8;
+    --ink: #23252B;
+    --ink-soft: #6B6C72;
+    --ok: #2F6F4E;
+    --warn: #B8860B;
+    --busy: #B23A2E;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 24px 18px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--ink-soft); font-size: 13px; margin: 0 0 22px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+  }
+  label { display: block; font-size: 12.5px; color: var(--ink-soft); margin-bottom: 6px; }
+  input[type=email], input[type=password], input[type=number] {
+    width: 100%;
+    font-size: 15px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+  .btn {
+    width: 100%;
+    padding: 11px;
+    border-radius: 8px;
+    border: none;
+    font-size: 14.5px;
+    font-weight: 700;
+    cursor: pointer;
+    background: var(--primary);
+    color: #fff;
+  }
+  .btn.ghost { background: var(--mint); color: var(--primary-dark); margin-top: 8px; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .status-pill {
+    font-size: 12.5px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+  .status-pill.ok { background: #E7F1EA; color: var(--ok); }
+  .status-pill.warn { background: #FBF3DB; color: var(--warn); }
+  .status-pill.busy { background: #FBEAE7; color: var(--busy); }
+  .bar-track { height: 8px; border-radius: 999px; background: var(--mint); overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--primary); transition: width 0.4s; }
+  .bar-fill.busy { background: var(--busy); }
+  .bar-fill.warn { background: var(--warn); }
+  .hint { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
+  .err { color: var(--busy); font-size: 13px; margin-top: 8px; min-height: 16px; }
+  .result-box { font-size: 13px; line-height: 1.6; }
+  .result-box .kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  #app { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🏎️ WSC Optuna 런처</h1>
+  <p class="sub">각자 독립된 Optuna 탐색을 서버에서 돌려볼 수 있어요.</p>
+
+  <div id="gate" class="card">
+    <label for="email">이메일</label>
+    <input type="email" id="email" autocomplete="email" />
+    <label for="password">비밀번호</label>
+    <input type="password" id="password" autocomplete="current-password" />
+    <button class="btn" id="loginBtn">로그인</button>
+    <p class="err" id="gateErr"></p>
+  </div>
+
+  <div id="app">
+    <div class="card">
+      <div class="status-row">
+        <strong style="font-size:14px;">서버 현황</strong>
+        <span class="status-pill" id="statusPill">-</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="statusBar" style="width:0%;"></div></div>
+      <p class="hint" id="statusText">불러오는 중...</p>
+    </div>
+
+    <div class="card">
+      <label for="nTrials">Trial 수</label>
+      <input type="number" id="nTrials" value="20" min="1" max="100" />
+      <button class="btn" id="runBtn">탐색 시작</button>
+      <p class="err" id="runErr"></p>
+    </div>
+
+    <div class="card" id="myRunCard" style="display:none;">
+      <div class="status-row">
+        <strong style="font-size:14px;">내 탐색 진행 상황</strong>
+        <span id="myRunStatus" style="font-size:12.5px; color:var(--ink-soft);"></span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="myRunBar" style="width:0%;"></div></div>
+      <p class="hint" id="myRunText"></p>
+      <div id="myRunResult" class="result-box" style="display:none; margin-top:10px;"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from './sync-config.js';
+
+let supabaseClient = null;
+async function getClient() {
+  if (supabaseClient) return supabaseClient;
+  const mod = await import('https://esm.sh/@supabase/supabase-js@2');
+  supabaseClient = mod.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  return supabaseClient;
+}
+
+let accessToken = null;
+let myRunId = null;
+let myRunTimer = null;
+
+function apiHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` };
+}
+
+async function tryAutoLogin() {
+  const client = await getClient();
+  const { data } = await client.auth.getSession();
+  if (data.session) {
+    accessToken = data.session.access_token;
+    showApp();
+  }
+}
+
+function showApp() {
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  refreshStatus();
+  setInterval(refreshStatus, 4000);
+}
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const errEl = document.getElementById('gateErr');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
+  try {
+    const client = await getClient();
+    const { data, error } = await client.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    accessToken = data.session.access_token;
+    showApp();
+  } catch (e) {
+    errEl.textContent = e.message || '로그인에 실패했어요.';
+  }
+});
+
+async function refreshStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const pill = document.getElementById('statusPill');
+    const bar = document.getElementById('statusBar');
+    const text = document.getElementById('statusText');
+
+    pill.textContent = `${data.level} ${data.occupancy_pct}%`;
+    pill.className = 'status-pill ' + (data.occupancy_pct < 50 ? 'ok' : data.occupancy_pct < 75 ? 'warn' : 'busy');
+    bar.style.width = `${data.occupancy_pct}%`;
+    bar.className = 'bar-fill ' + (data.occupancy_pct < 50 ? '' : data.occupancy_pct < 75 ? 'warn' : 'busy');
+    text.textContent = `실행 중 ${data.active}/${data.max_concurrent}명` + (data.queued > 0 ? ` · 대기 ${data.queued}명` : '');
+  } catch (e) {
+    // 상태 조회 실패는 조용히 무시 (다음 폴링에서 재시도)
+  }
+}
+
+document.getElementById('runBtn').addEventListener('click', async () => {
+  const nTrials = parseInt(document.getElementById('nTrials').value, 10);
+  const errEl = document.getElementById('runErr');
+  const btn = document.getElementById('runBtn');
+  errEl.textContent = '';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/runs', {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({ n_trials: nTrials }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '실행 요청에 실패했어요.');
+    }
+    const data = await res.json();
+    myRunId = data.run_id;
+    document.getElementById('myRunCard').style.display = 'block';
+    document.getElementById('myRunResult').style.display = 'none';
+    pollMyRun();
+    if (myRunTimer) clearInterval(myRunTimer);
+    myRunTimer = setInterval(pollMyRun, 3000);
+  } catch (e) {
+    errEl.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function pollMyRun() {
+  if (!myRunId) return;
+  try {
+    const res = await fetch(`/api/runs/${myRunId}`, { headers: apiHeaders() });
+    const data = await res.json();
+    const statusEl = document.getElementById('myRunStatus');
+    const bar = document.getElementById('myRunBar');
+    const text = document.getElementById('myRunText');
+
+    if (data.status === 'queued') {
+      statusEl.textContent = '대기 중';
+      bar.style.width = '0%';
+      text.textContent = `대기열 ${data.position}번째`;
+    } else if (data.status === 'running') {
+      statusEl.textContent = '실행 중';
+      const pct = data.progress_pct ?? 0;
+      bar.style.width = `${pct}%`;
+      text.textContent = `Trial ${data.trial_current ?? 0} / ${data.n_trials} (${pct}%)`;
+    } else if (data.status === 'finalizing') {
+      statusEl.textContent = '마무리 중';
+      text.textContent = '결과 정리하는 중이에요, 잠시만요...';
+    } else if (data.status === 'done') {
+      statusEl.textContent = '완료';
+      bar.style.width = '100%';
+      text.textContent = '탐색이 끝났어요.';
+      showResult(data.result);
+      clearInterval(myRunTimer);
+    } else if (data.status === 'error') {
+      statusEl.textContent = '오류';
+      text.textContent = data.result?.error || '탐색 중 문제가 발생했어요.';
+      clearInterval(myRunTimer);
+    }
+  } catch (e) {
+    // 폴링 실패는 조용히 재시도
+  }
+}
+
+function showResult(result) {
+  const box = document.getElementById('myRunResult');
+  box.style.display = 'block';
+  const paramsHtml = Object.entries(result.best_params || {})
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><span>${typeof v === 'number' ? v.toFixed(3) : v}</span></div>`)
+    .join('');
+  box.innerHTML = `
+    <div class="kv"><span>Best Value</span><span>${Number(result.best_value).toFixed(3)}</span></div>
+    <div class="kv"><span>종료 사유</span><span>${result.termination_reason ?? '-'}</span></div>
+    <div style="margin-top:8px; font-weight:700; font-size:12.5px;">Best Params</div>
+    ${paramsHtml}
+  `;
+}
+
+tryAutoLogin();
+</script>
+</body>
+</html>
