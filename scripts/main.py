@@ -41,6 +41,17 @@ def build_objective():
     env_data = pd.read_csv("outputs/env_data.csv")
     env_data = env_data.set_index(["total_distance_m", "DY", "HR"])
 
+    # run_simulation()이 실제로 읽는 컬럼만 남기고 나머지는 버립니다.
+    # env_data.csv엔 temperature_2m, surface_pressure, lat/lon 등도 같이
+    # 들어있는데, Vehicle_Function.py의 env_row[...] 사용처를 다 확인해보니
+    # 실제로 쓰는 건 이 4개뿐이었어요. 안 쓰는 컬럼까지 그대로 딕셔너리로
+    # 바꾸면(to_dict) 메모리를 꽤 잡아먹어서 - 이 5개(K개 날씨) 사본을 동시에
+    # 들고 있어야 하는 objective()에서 특히 부담이 커요(1GB 메모리 서버 대응).
+    # 이 리스트를 바꿔야 할 일이 생기면(Vehicle_Function.py에서 새 필드를
+    # 쓰게 되면) 여기도 같이 추가해줘야 해요.
+    ENV_NEEDED_COLS = ["shortwave_radiation", "shortwave_radiation_std", "wind_speed_10m", "wind_speed_10m_std", "wind_direction_10m"]
+    env_data = env_data[ENV_NEEDED_COLS]
+
     # 거리 10km 격자 전처리
     # .to_numpy(): pandas Index 그대로 두면 compute_lookahead()의 매 스텝
     # dist_vals - future_dist_m 연산이 pandas 내부 타입체크/dtype추론을
