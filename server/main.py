@@ -145,6 +145,17 @@ def get_status():
     with _lock:
         active = _active_count()
         queued = len(QUEUE)
+        running_list = [
+            {"nickname": r["nickname"], "study_name": r["study_name"], "n_trials": r["n_trials"]}
+            for r in RUNS.values() if r["status"] == "running"
+        ]
+        queue_list = [
+            {"nickname": RUNS[run_id]["nickname"], "n_trials": RUNS[run_id]["n_trials"]}
+            for run_id in QUEUE
+        ]
+    for item in running_list:
+        progress = _read_progress_data(item.pop("study_name"))
+        item["trial_current"] = progress["completed"]
     occupancy = round(active / MAX_CONCURRENT * 100) if MAX_CONCURRENT else 0
     if occupancy < 50:
         level = "원활"
@@ -158,6 +169,8 @@ def get_status():
         "queued": queued,
         "occupancy_pct": occupancy,
         "level": level,
+        "running": running_list,
+        "queue": queue_list,
     }
 
 
@@ -195,6 +208,7 @@ def create_run(payload: dict, authorization: str | None = Header(default=None)):
         RUNS[run_id] = {
             "user_id": user.get("id"),
             "user_email": user.get("email"),
+            "nickname": nickname,
             "access_token": access_token,
             "study_name": study_name,
             "n_trials": n_trials,
