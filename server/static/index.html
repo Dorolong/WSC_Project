@@ -83,29 +83,17 @@
 <div class="wrap">
   <h1>🏎️ WSC Optuna 런처</h1>
   <p class="sub">각자 독립된 Optuna 탐색을 서버에서 돌려볼 수 있어요.</p>
-  <p class="sub" style="margin-top:-14px;">
-    <a href="https://wscproject-dmiusnw9kapxecz8irxpgw.streamlit.app/" target="_blank" rel="noopener">🚗 시뮬레이터로</a>
-    &nbsp;·&nbsp;
-    <a href="https://github.com/Dorolong/WSC_Project" target="_blank" rel="noopener">💻 코드 보기</a>
-  </p>
 
   <div id="gate" class="card">
     <label for="email">이메일</label>
     <input type="email" id="email" autocomplete="email" />
     <label for="password">비밀번호</label>
     <input type="password" id="password" autocomplete="current-password" />
-    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); margin-bottom:12px;">
-      <input type="checkbox" id="rememberEmail" style="width:auto;" />아이디 저장
-    </label>
     <button class="btn" id="loginBtn">로그인</button>
     <p class="err" id="gateErr"></p>
   </div>
 
   <div id="app">
-    <div class="status-row" style="margin-bottom:10px;">
-      <span style="font-size:12.5px; color:var(--ink-soft);" id="loggedInAs"></span>
-      <button id="logoutBtn" style="background:none; border:none; color:var(--ink-soft); font-size:12.5px; text-decoration:underline; cursor:pointer; padding:0;">로그아웃</button>
-    </div>
     <div class="card">
       <div class="status-row">
         <strong style="font-size:14px;">서버 현황</strong>
@@ -146,26 +134,18 @@ async function getClient() {
 }
 
 let accessToken = null;
-let userEmail = null;
 let myRunId = null;
 let myRunTimer = null;
-const SAVED_EMAIL_KEY = 'wscOptunaSavedEmail';
 
 function apiHeaders() {
   return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` };
 }
 
 async function tryAutoLogin() {
-  const saved = localStorage.getItem(SAVED_EMAIL_KEY);
-  if (saved) {
-    document.getElementById('email').value = saved;
-    document.getElementById('rememberEmail').checked = true;
-  }
   const client = await getClient();
   const { data } = await client.auth.getSession();
   if (data.session) {
     accessToken = data.session.access_token;
-    userEmail = data.session.user.email;
     showApp();
   }
 }
@@ -173,7 +153,6 @@ async function tryAutoLogin() {
 function showApp() {
   document.getElementById('gate').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  document.getElementById('loggedInAs').textContent = userEmail ? `${userEmail}로 로그인됨` : '';
   refreshStatus();
   setInterval(refreshStatus, 4000);
   resumeMyRun();
@@ -197,7 +176,6 @@ async function resumeMyRun() {
 document.getElementById('loginBtn').addEventListener('click', async () => {
   const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
-  const remember = document.getElementById('rememberEmail').checked;
   const errEl = document.getElementById('gateErr');
   errEl.textContent = '';
   if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
@@ -206,26 +184,10 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
     const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) throw error;
     accessToken = data.session.access_token;
-    userEmail = data.session.user.email;
-    if (remember) localStorage.setItem(SAVED_EMAIL_KEY, email);
-    else localStorage.removeItem(SAVED_EMAIL_KEY);
     showApp();
   } catch (e) {
     errEl.textContent = e.message || '로그인에 실패했어요.';
   }
-});
-
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  const client = await getClient();
-  await client.auth.signOut();
-  accessToken = null;
-  userEmail = null;
-  myRunId = null;
-  if (myRunTimer) clearInterval(myRunTimer);
-  document.getElementById('myRunCard').style.display = 'none';
-  document.getElementById('password').value = '';
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('gate').style.display = 'block';
 });
 
 async function refreshStatus() {
