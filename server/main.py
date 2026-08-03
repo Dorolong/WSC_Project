@@ -81,7 +81,8 @@ def _try_start_next():
         run_id = QUEUE.pop(0)
         run = RUNS[run_id]
         proc = subprocess.Popen(
-            [sys.executable, STUDY_RUNNER, run["study_name"], str(run["n_trials"])],
+            [sys.executable, STUDY_RUNNER, run["study_name"], str(run["n_trials"]),
+             run["user_id"], run["access_token"]],
             cwd=PROJECT_ROOT,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -105,18 +106,38 @@ def _watcher_loop():
 threading.Thread(target=_watcher_loop, daemon=True).start()
 
 
-def _read_trial_progress(study_name: str):
-    """Optuna study의 sqlite storage를 직접 읽어서 완료된 trial 수를 셉니다."""
+def _read_progress_data(study_name: str):
+    """study_runner.py가 매 trial마다 남기는 진행률 파일을 읽습니다.
+    (study 파일을 직접 열어서 세는 것보다 가볍고, 디스크 부족으로 study가
+    로테이션돼도 이 파일 경로는 그대로라 끊김 없이 진행률을 보여줄 수 있음)"""
     try:
-        import optuna
-        db_path = os.path.join(STUDIES_DIR, f"{study_name}.db")
-        if not os.path.exists(db_path):
-            return 0
-        study = optuna.load_study(study_name=study_name, storage=f"sqlite:///{db_path}")
-        completed = sum(1 for t in study.get_trials(deepcopy=False) if t.state.is_finished())
-        return completed
+        progress_path = os.path.join(RESULTS_DIR, f"{study_name}_progress.json")
+        if not os.path.exists(progress_path):
+            return {"completed": 0, "started_at": None}
+        with open(progress_path, encoding="utf-8") as f:
+            data = json.load(f)
+            return {"completed": data.get("completed", 0), "started_at": data.get("started_at")}
     except Exception:
-        return None
+        return {"completed": None, "started_at": None}
+
+
+# 실제로 관측된 "trial 하나당 걸리는 시간" - 셰이프를 바꾸거나(Ampere<->Micro)
+# 서버가 바빠지면 자연스럽게 다시 계산돼요. 아직 아무 데이터도 없을 때 쓰는
+# 초기값이라 정확하지 않을 수 있어요 - 첫 실행이 끝나면 바로 실측값으로 바뀝니다.
+_pace_lock = threading.Lock()
+_last_known_pace_seconds = 90.0
+
+
+def _update_pace(seconds_per_trial):
+    global _last_known_pace_seconds
+    if seconds_per_trial and seconds_per_trial > 0:
+        with _pace_lock:
+            _last_known_pace_seconds = seconds_per_trial
+
+
+def _get_pace():
+    with _pace_lock:
+        return _last_known_pace_seconds
 
 
 @app.get("/api/status")
@@ -143,6 +164,7 @@ def get_status():
 @app.post("/api/runs")
 def create_run(payload: dict, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
+    access_token = authorization.removeprefix("Bearer ").strip()
     n_trials = int(payload.get("n_trials", 20))
     if n_trials < 1 or n_trials > MAX_TRIALS_PER_RUN:
         raise HTTPException(status_code=400, detail=f"trial 수는 1~{MAX_TRIALS_PER_RUN} 사이여야 해요.")
@@ -154,7 +176,9 @@ def create_run(payload: dict, authorization: str | None = Header(default=None)):
 
     with _lock:
         RUNS[run_id] = {
+            "user_id": user.get("id"),
             "user_email": user.get("email"),
+            "access_token": access_token,
             "study_name": study_name,
             "n_trials": n_trials,
             "process": None,
@@ -179,6 +203,16 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
         study_name = run["study_name"]
         n_trials = run["n_trials"]
         position_in_queue = QUEUE.index(run_id) + 1 if run_id in QUEUE else None
+        # 대기 예상시간 계산용: 지금 앞서 실행 중인 것들의 남은 trial + 내 앞의 대기열 trial 총합
+        ahead_trials = 0
+        if position_in_queue is not None:
+            for other in RUNS.values():
+                if other["status"] == "running":
+                    other_progress = _read_progress_data(other["study_name"])
+                    other_done = other_progress["completed"] or 0
+                    ahead_trials += max(other["n_trials"] - other_done, 0)
+            for other_id in QUEUE[:position_in_queue - 1]:
+                ahead_trials += RUNS[other_id]["n_trials"]
 
     if status in ("finished_process", "done", "error"):
         result_path = os.path.join(RESULTS_DIR, f"{study_name}.json")
@@ -192,16 +226,39 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
         return {"run_id": run_id, "status": "finalizing", "n_trials": n_trials}
 
     if status == "queued":
-        return {"run_id": run_id, "status": "queued", "position": position_in_queue, "n_trials": n_trials}
+        pace = _get_pace()
+        return {
+            "run_id": run_id,
+            "status": "queued",
+            "position": position_in_queue,
+            "n_trials": n_trials,
+            "estimated_wait_seconds": round(ahead_trials * pace),
+        }
 
     # running
-    trial_current = _read_trial_progress(study_name)
+    progress = _read_progress_data(study_name)
+    trial_current = progress["completed"]
+    estimated_remaining_seconds = None
+    if trial_current:
+        pace = _get_pace()
+        if progress["started_at"]:
+            try:
+                started = datetime.fromisoformat(progress["started_at"])
+                elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+                if trial_current > 0:
+                    pace = elapsed / trial_current  # 이 실행 자체의 실측 속도가 더 정확함
+                    _update_pace(pace)  # 다음 대기자들의 예상시간 계산에도 이 실측값을 반영
+            except (ValueError, TypeError):
+                pass
+        estimated_remaining_seconds = round(max(n_trials - trial_current, 0) * pace)
+
     return {
         "run_id": run_id,
         "status": "running",
         "n_trials": n_trials,
         "trial_current": trial_current,
         "progress_pct": round(trial_current / n_trials * 100) if trial_current is not None else None,
+        "estimated_remaining_seconds": estimated_remaining_seconds,
     }
 
 
