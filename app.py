@@ -61,7 +61,7 @@ def cfg_to_jsonable(cfg):
         return o
     return {
         name: convert(dataclasses.asdict(getattr(cfg, name)))
-        for name in ("physics", "solar", "cell", "pack", "power", "drive", "race")
+        for name in ("physics", "solar", "cell", "pack", "power", "drive", "race", "simpara")
     }
 
 def cfg_from_jsonable(data):
@@ -69,7 +69,7 @@ def cfg_from_jsonable(data):
     덮어써서, 나중에 필드가 추가돼도(예: 새 차량 제원 항목) 저장 당시엔 없던
     필드는 기본값으로 안전하게 채워짐."""
     cfg = build_default_cfg()
-    for name in ("physics", "solar", "power", "drive", "race"):
+    for name in ("physics", "solar", "power", "drive", "race", "simpara"):
         obj = getattr(cfg, name)
         for k, v in data.get(name, {}).items():
             if hasattr(obj, k):
@@ -106,6 +106,14 @@ if "sim_running" not in st.session_state:
 # 충분"한 가벼운 용도이기 때문 - 내부 개발 이력은 progress/, debug_logs/
 # 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
 RELEASE_NOTES = [
+    {
+        "version": "1.0.8",
+        "date": "2026-08-03",
+        "title": "차량 제원 설정에 '시뮬레이션 설정' 탭 추가",
+        "details": "- 신호등/보행자 신호 평균 대기시간, 최소 SOC 보장값 등을 설정 화면에서 직접 조정 가능\n"
+                    "- (버그 수정) 이 값들이 세션별로 분리가 안 돼있어서 한 사용자가 바꾸면 다른 모든 "
+                    "사용자에게도 반영되던 문제를 같이 고침 (예전 차량 제원 버그와 같은 종류)",
+    },
     {
         "version": "1.0.7",
         "date": "2026-08-03",
@@ -226,12 +234,12 @@ def vehicle_settings_dialog():
         st.rerun()
 
     cfg = st.session_state.cfg
-    physics, solar, cell, pack, power, drive, race = (
-        cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race
+    physics, solar, cell, pack, power, drive, race, simpara = (
+        cfg.physics, cfg.solar, cfg.cell, cfg.pack, cfg.power, cfg.drive, cfg.race, cfg.simpara
     )
 
-    tab_physics, tab_solar, tab_cell, tab_pack, tab_power, tab_drive, tab_race, tab_ocv = st.tabs(
-        ["물리 제원", "태양광 패널", "배터리 셀", "배터리 팩", "전력 시스템", "구동계", "레이스 설정", "OCV 테이블"]
+    tab_physics, tab_solar, tab_cell, tab_pack, tab_power, tab_drive, tab_race, tab_sim, tab_ocv = st.tabs(
+        ["물리 제원", "태양광 패널", "배터리 셀", "배터리 팩", "전력 시스템", "구동계", "레이스 설정", "시뮬레이션 설정", "OCV 테이블"]
     )
 
     with tab_physics:
@@ -284,6 +292,15 @@ def vehicle_settings_dialog():
         soc_min    = st.number_input("출발 최소 SOC",            value=race.soc_start_min)
         cs_max     = st.number_input("CS 최대 정차 시간 [s]",    value=float(race.cs_stop_max))
         cs_min     = st.number_input("CS 최소 정차 시간 [s]",    value=float(race.cs_stop_min))
+
+    with tab_sim:
+        st.caption("신호등·보행자 신호에 걸렸을 때 지연 시간, 그리고 시뮬레이션 안전 마진값들이에요.")
+        traffic_delay    = st.number_input("신호등 평균 대기시간 [s]",   value=float(simpara.avg_traffic_light_delay))
+        pedestrian_delay = st.number_input("보행자 신호 평균 대기시간 [s]", value=float(simpara.avg_pedestrian_light_delay))
+        soc_hard_stop    = st.number_input("최소 SOC 보장값",           value=simpara.soc_hard_stop,
+                                            help="배터리 SOC가 이 값 밑으로 떨어지면 안전상 주행을 멈춰요.")
+        max_v_delta      = st.number_input("매 스텝 최대 속도 변화량 [m/s]", value=float(simpara.max_v_delta))
+        decel_brake      = st.number_input("Control Stop 진입 감속도 [g]", value=simpara.decel_brake)
 
     with tab_ocv:
         ocv_df = pd.DataFrame({
@@ -347,6 +364,12 @@ def vehicle_settings_dialog():
         race.soc_start_min  = soc_min
         race.cs_stop_max    = int(cs_max)
         race.cs_stop_min    = int(cs_min)
+
+        simpara.avg_traffic_light_delay    = int(traffic_delay)
+        simpara.avg_pedestrian_light_delay = int(pedestrian_delay)
+        simpara.soc_hard_stop              = soc_hard_stop
+        simpara.max_v_delta                = int(max_v_delta)
+        simpara.decel_brake                = decel_brake
 
         if save_to_account:
             try:
@@ -712,11 +735,11 @@ if st.session_state.last_df is not None:
     # 결과 분석 (규칙 기반 - 종료 사유별 분기)
     st.subheader("결과 분석")
     if reason == "완주":
-        soc_margin = df["soc"].min() - simpara.soc_hard_stop
+        soc_margin = df["soc"].min() - st.session_state.cfg.simpara.soc_hard_stop
         if soc_margin < 0.05:
             st.warning(
                 f"완주는 했지만 최저 SOC({df['soc'].min()*100:.1f}%)가 하한"
-                f"({simpara.soc_hard_stop*100:.0f}%)에 근접했습니다. 여유가 적은 편이라, "
+                f"({st.session_state.cfg.simpara.soc_hard_stop*100:.0f}%)에 근접했습니다. 여유가 적은 편이라, "
                 f"날씨가 조금만 나빴어도 실패했을 수 있습니다."
             )
         else:
