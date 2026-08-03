@@ -161,6 +161,23 @@ def get_status():
     }
 
 
+@app.get("/api/my-active-run")
+def get_my_active_run(authorization: str | None = Header(default=None)):
+    """로그인한 사용자가 가장 최근에 시작한 실행의 run_id를 돌려줍니다.
+    페이지를 새로고침하거나 나갔다 다시 들어와도(브라우저 메모리엔 run_id가
+    안 남아있으니) 이걸로 "내가 뭘 돌리고 있었는지" 다시 찾아서 진행 상황
+    카드를 이어서 보여줄 수 있어요. 상태(대기/실행/완료/오류)는 안 가리고
+    가장 최근 것 하나만 돌려주고, 실제 상태 판단은 기존 /api/runs/{id}가 함."""
+    user = verify_user(authorization)
+    user_id = user.get("id")
+    with _lock:
+        mine = [(run_id, run) for run_id, run in RUNS.items() if run["user_id"] == user_id]
+    if not mine:
+        return {"run_id": None}
+    mine.sort(key=lambda x: x[1]["queued_at"], reverse=True)
+    return {"run_id": mine[0][0]}
+
+
 @app.post("/api/runs")
 def create_run(payload: dict, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
@@ -194,11 +211,13 @@ def create_run(payload: dict, authorization: str | None = Header(default=None)):
 
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str, authorization: str | None = Header(default=None)):
-    verify_user(authorization)
+    user = verify_user(authorization)
     with _lock:
         run = RUNS.get(run_id)
         if not run:
             raise HTTPException(status_code=404, detail="해당 실행을 찾을 수 없어요.")
+        if run["user_id"] != user.get("id"):
+            raise HTTPException(status_code=403, detail="본인의 실행만 조회할 수 있어요.")
         status = run["status"]
         study_name = run["study_name"]
         n_trials = run["n_trials"]
