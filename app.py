@@ -242,7 +242,6 @@ def code_viewer_dialog():
     for path, desc in CODE_VIEWER_FILES:
         if st.button(f"📄 {path}", key=f"codeview_{path}", use_container_width=True, help=desc):
             st.session_state.code_viewer_selected = path
-            st.rerun()
 
     if st.session_state.code_viewer_selected:
         st.divider()
