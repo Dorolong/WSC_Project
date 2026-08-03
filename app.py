@@ -38,6 +38,30 @@ supabase = st.session_state.supabase
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# 자동 로그인: 로그인 성공 시 Supabase의 refresh token을 브라우저
+# localStorage에 저장해뒀다가(아래 session_storage() 함수), 페이지를 새로
+# 열 때마다 그 토큰으로 세션을 복구 시도. Streamlit은 파이썬이 서버에서
+# 도는 구조라 브라우저 저장공간을 직접 못 봐서, route_animator와 같은
+# 방식의 작은 JS 컴포넌트(components/session_storage/)를 통해서만 가능함.
+_session_storage_component = components.declare_component(
+    "session_storage",
+    path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "components", "session_storage")
+)
+
+def session_storage(save_token=None, action=None, key="session_storage_main"):
+    return _session_storage_component(save_token=save_token, action=action, key=key, default=None)
+
+if st.session_state.user is None and not st.session_state.get("auto_login_tried"):
+    _stored_refresh_token = session_storage(key="session_storage_reader")
+    if _stored_refresh_token:
+        st.session_state.auto_login_tried = True  # 실패해도 같은 세션에서 반복 재시도 안 함
+        try:
+            res = supabase.auth.refresh_session(_stored_refresh_token)
+            st.session_state.user = res.user
+            st.rerun()
+        except Exception:
+            pass  # 토큰 만료/무효 - 그냥 로그인 화면 유지
+
 # 차량 제원(physics/solar/cell/pack/power/drive/race) 묶음: 세션별로 독립된
 # 인스턴스로 만들어서 st.session_state에 보관. 예전엔 Configs.Vehicle_Params의
 # 전역 싱글턴(physics 등)을 "차량 제원 설정" 다이얼로그가 직접 수정했는데,
@@ -510,6 +534,7 @@ with st.sidebar:
                 try:
                     res = supabase.auth.sign_in_with_password({"email": login_email, "password": login_pw})
                     st.session_state.user = res.user
+                    session_storage(save_token=res.session.refresh_token, key="session_storage_writer")
                     st.rerun()
                 except Exception as e:
                     st.error(f"로그인 실패: {e}")
@@ -536,6 +561,7 @@ with st.sidebar:
         if st.button("로그아웃", key="logout_btn"):
             supabase.auth.sign_out()
             st.session_state.user = None
+            session_storage(action="clear", key="session_storage_writer")
             st.rerun()
 
         with st.expander("닉네임 수정"):
