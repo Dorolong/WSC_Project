@@ -113,6 +113,7 @@
       </div>
       <div class="bar-track"><div class="bar-fill" id="statusBar" style="width:0%;"></div></div>
       <p class="hint" id="statusText">불러오는 중...</p>
+      <div id="runningList" style="margin-top:6px;"></div>
     </div>
 
     <div class="card">
@@ -241,6 +242,16 @@ async function refreshStatus() {
     bar.style.width = `${data.occupancy_pct}%`;
     bar.className = 'bar-fill ' + (data.occupancy_pct < 50 ? '' : data.occupancy_pct < 75 ? 'warn' : 'busy');
     text.textContent = `실행 중 ${data.active}/${data.max_concurrent}명` + (data.queued > 0 ? ` · 대기 ${data.queued}명` : '');
+
+    const runningEl = document.getElementById('runningList');
+    const lines = [];
+    (data.running || []).forEach(r => {
+      lines.push(`실행중: ${r.nickname}`);
+    });
+    (data.queue || []).forEach((q, i) => {
+      lines.push(`대기 ${i + 1}) ${q.nickname}`);
+    });
+    runningEl.innerHTML = lines.map(l => `<p class="hint" style="margin-top:4px;">${l}</p>`).join('');
   } catch (e) {
     // 상태 조회 실패는 조용히 무시 (다음 폴링에서 재시도)
   }
