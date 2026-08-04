@@ -21,7 +21,42 @@ MPC(+ 추후 강화학습) 프로젝트.
 | 6 | 강화학습 실험 — `rl/` | 미착수 |
 | 7 | 실측 데이터 교체 | 미착수 |
 
-## 현재 상태 (2026-08-02)
+## 현재 상태 (2026-08-05)
+
+> **이 프로젝트는 이제 앱이 2개로 나뉘어 있습니다.**
+> 1. **Streamlit 앱**(`app.py`, Streamlit Cloud) — 단일 시뮬레이션 실행 + 결과
+>    시각화 + 차량 제원 설정
+> 2. **Optuna 웹 런처**(`server/`, 오라클 클라우드) — 팀원이 각자 로그인해서
+>    MPC 파라미터 탐색(여러 trial)을 서버에서 돌리는 도구
+>
+> 둘은 **같은 Supabase 프로젝트**를 공유해서 계정·결과가 이어집니다.
+> 배포 절차는 `server/README.md` 참고.
+
+- **[신규] Optuna 웹 런처(오라클 서버) + 앱 연동**: Streamlit Cloud 무료
+  티어로는 탐색을 못 돌린다는 제약을, 별도 FastAPI 런처를 오라클 서버에
+  띄워서 해결. 로그인(Supabase 토큰 검증) → 대기열(동시 실행 1개 제한) →
+  별도 프로세스로 탐색 실행 → 진행률/예상시간 표시 → 20 trial마다
+  `optuna_runs` 테이블에 체크포인트 저장. 디스크가 부족해지면 지금까지의
+  best_params를 이어받아 새 study로 로테이션. Streamlit 앱에서는 사이드바
+  "내 Optuna 탐색 결과"에서 결과를 보고 "이 파라미터로 시뮬레이션하기"로
+  바로 적용 가능 (`progress/34`). **아직 서버에서 실제 기동 테스트는 안 된
+  상태 — 배포 후 검증 필요.**
+- **[신규] 자동 로그인 / 코드 보기**: refresh token을 브라우저
+  localStorage에 저장(`components/session_storage/`)해서 새로고침해도 로그인
+  유지. 사이드바 "코드 보기"로 GitHub raw에서 주요 파일을 읽기 전용 조회
+  (`progress/34`).
+- **[신규] "시뮬레이션 설정" 탭 + simpara 세션 격리**: 신호등/보행자 대기시간,
+  `soc_hard_stop`, `max_v_delta`, `decel_brake`를 앱에서 직접 조정 가능.
+  `simpara`도 `cfg`에 포함시켜 세션별로 격리 (`progress/34`).
+- **[버그 수정] `mpc_controller.py`의 `simpara` 전역 참조 제거**: 속도 댐퍼가
+  세션 `cfg`가 아니라 모듈 전역을 읽고 있어서, 사용자가 `max_v_delta`를 바꿔도
+  조용히 무시되던 문제. 전 구간 시뮬레이션 A/B로 반영 확인 (`progress/36`).
+- **`scripts/main.py` 재구성**: `build_objective()` / `run_best_params_simulation()`
+  / `run_cli()`로 분리해서 CLI와 웹 런처가 **같은 탐색 공간 코드**를 공유하게 함.
+  내리막 세그먼트 경계 배열 추출도 완성(단, 이를 쓰는 `compute_downhill_cap()`이
+  아직 없어 현재는 계산만 하고 미사용) (`progress/34`).
+
+### 이전까지의 상태 (2026-08-02)
 - **릴리즈 노트(버전 표시) + 첫 로그인 튜토리얼 팝업**: 앱 제목 옆에
   현재 버전(`v1.0.6`)과 "릴리즈 노트" 버튼 추가 - 클릭 시 버전별
   업데이트 내역을 펼쳐서 확인 가능(`app.py`의 `RELEASE_NOTES` 리스트,
@@ -116,7 +151,7 @@ MPC(+ 추후 강화학습) 프로젝트.
   트라이얼 병렬화 설정은 탐색 직전으로 계속 보류, 현재
   `scripts/main.py`가 임시 스모크테스트 설정(`n_trials=2`, 테스트용
   study_name/storage)으로 남아있어 본 탐색 전 원복 필요)
-- 자세한 진행 내역은 `progress/`(주제별 정리, 특히 `progress/33`이
+- 자세한 진행 내역은 `progress/`(주제별 정리, 특히 `progress/37`이
   다음 할 일 목록), `debug_logs/`(디버깅 과정) 참고
 
 ## 폴더 구조
@@ -132,9 +167,17 @@ mpc/                MPC 속도 플래너 (Rule-based, LV1~LV8)
 Environment/        기상 데이터 수집 (Open-Meteo API)
   Open_Meteo_API.py
 scripts/            CLI 실행 스크립트
-  main.py             Optuna 파라미터 최적화
+  main.py             Optuna 파라미터 최적화 (build_objective()는 웹 런처도
+                      import해서 재사용 - 탐색 공간 정의는 여기 한 곳뿐)
+server/             Optuna 웹 런처 (오라클 서버에서만 구동, Streamlit과 별개)
+  main.py             FastAPI - 인증/대기열/진행률 API + 정적 프론트 서빙
+  study_runner.py     실제 탐색을 도는 별도 프로세스 (체크포인트·디스크 로테이션)
+  static/index.html   로그인·실행·진행률 UI (순수 HTML/JS)
+  wsc-launcher.service systemd 유닛 (재부팅 시 자동 기동)
+  README.md           서버 배포 가이드
 components/         Streamlit 커스텀 컴포넌트
   route_animator/     경로 진행 애니메이션 (순수 HTML/JS, 빌드 불필요)
+  session_storage/    refresh token을 브라우저 localStorage에 저장 (자동 로그인)
 assets/             정적 자산
   australia_silhouette.png  지도 배경용 호주 실루엣 (Natural Earth 데이터)
 outputs/            시뮬레이션 결과물 + Optuna DB 아카이브
@@ -198,24 +241,47 @@ LV8 자체의 재설계 배경은 `debug_logs/(2026-07-13)_LV8_시간예산_설�
 
 ## 할 일
 
-### 단기 (진행 중, 다음에 이어서 할 것 - 자세한 건 `progress/33` 참고)
-- [ ] 내리막 세그먼트 경계 배열 추출 (main.py/app.py, 작성 중
-      미완성 상태로 세션 종료)
+### 1순위 - Optuna 웹 런처 실제 동작 검증 (자세한 건 `progress/37` 참고)
+서버 코드는 인터넷 없는 환경에서 작성돼 **한 번도 실제로 띄워본 적이 없음.**
+- [ ] 오라클 서버에서 `uvicorn server.main:app --host 0.0.0.0 --port 8000`
+      기동 → 접속 확인 (포트 8000 Security List 개방 필요)
+- [ ] 로그인 → 탐색 시작 → 진행률 표시 → Streamlit 앱 "내 Optuna 탐색
+      결과"에 반영 → "이 파라미터로 시뮬레이션하기"까지 한 번 관통 확인
+- [ ] 배포본에서 자동 로그인·코드 보기 동작 확인
+- [ ] 문제 없으면 systemd 등록 (`server/README.md` 절차)
+
+### 2순위 - MPC 물리 building block 완성 (설계 완료, `progress/22` 스펙)
+- [x] 내리막 세그먼트 경계 배열 추출 (`scripts/main.py` 112~130줄) —
+      단, 아래 `compute_downhill_cap()`이 없어 **현재는 계산만 하고 미사용**
 - [ ] `compute_downhill_cap(step, const)` 구현 (설계 완료, 코드 없음)
-- [ ] CS 접근 코스팅/제동 구현 (`coast_distance`, `simpara.decel_active`
-      - 설계 완료, 코드 없음)
-- [ ] `simpara.decel_active` 상수 추가 (`Configs/Vehicle_Params.py`)
+      — `physics`/`drive`를 전역이 아니라 `const`에서 꺼내 쓸 것
+      — 완성되면 `app.py`에도 같은 세그먼트 전처리 추가 필요 (현재 main.py에만 있음)
+- [ ] CS 접근 코스팅/제동 구현 (`coast_distance`, `simpara.decel_brake`)
+- [x] `simpara.decel_brake` 상수 추가 (0.7g) + 앱에서 편집 가능 —
+      **단 아직 물리 로직에서 미사용**
 - [ ] `light_arrive()` 단위 불일치 버그 수정 (미터 vs km, 신호등
       지연 미발동 - 수정 보류 중으로 결정)
-- [ ] 속도 정수(int) 출력 반영 (`results.append()` 시점에만 반올림,
-      내부 계산은 float 유지 - 결정은 됐고 코드 반영만 남음)
-- [ ] Optuna 트라이얼 병렬화 설정 (SQLite WAL 모드 + 별도 프로세스
-      여러 개로 분산 - 탐색 재실행 직전에 처리하기로 보류 중)
-- [ ] 위 정리 끝나면 새 Optuna 탐색 실행 (`scripts/main.py`를 임시
-      스모크테스트 설정에서 `n_trials=50`, `study_name="WSC_MPC_Opt"`,
+- [ ] 위 정리 끝나면 새 Optuna 탐색 실행 (웹 런처로 실행 가능. CLI로 돌릴
+      거면 `scripts/main.py`의 `run_cli()`가 아직 스모크테스트 설정이라
+      `n_trials=50`, `study_name="WSC_MPC_Opt"`,
       `storage="sqlite:///outputs/optuna_study.db"`로 원복 필요)
 
+### 3순위 - 문서/인프라 정리
+- [ ] `CLAUDE.md`(ZIP 기반)와 `AGENTS.md`(Git 기반) 작업방식 불일치 정리
+- [ ] `optuna_runs` 테이블 SQL을 `SETUP.md`에 정리 (현재 레포에 SQL 원문 없음)
+- [ ] `SETUP.md`에 `server/` 배포 절차 링크 추가
+- [ ] 서버 보안 검토 (CORS `*`, anon key 하드코딩 — RLS 전제라 당장 위험은
+      아니지만 노출 범위 검토)
+
+### 4순위 - 예전부터 보류 중
+- [ ] 속도 정수(int) 출력 반영 (`results.append()` 시점에만 반올림)
+- [ ] `momentum_gain`을 Optuna 탐색공간에 넣을지 결정
+- [ ] `termination_reason`을 `objective()` 스코어링에 활용할지 검토
+
 ### 완료
+- [x] `mpc_controller.py` `simpara` 전역참조 제거 (`progress/36`)
+- [x] Optuna 웹 런처(오라클) + 앱 연동 + `simpara` 세션격리 + 자동 로그인 +
+      코드 보기 (`progress/34`)
 - [x] 릴리즈 노트(버전 표시) + 첫 로그인 튜토리얼 팝업 (`progress/32`)
 - [x] 차량 제원 설정 계정 저장/불러오기 (`progress/30`)
 - [x] 차량 제원 설정 전역상태 격리 버그수정 - `cfg` 세션별 격리 (`progress/28`)

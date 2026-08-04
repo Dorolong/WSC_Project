@@ -509,6 +509,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
         power               = power,
         drive               = drive,
         race                = race,
+        simpara             = simpara,
         )
 
     while i < n:

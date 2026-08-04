@@ -5,8 +5,6 @@
 import math as m
 import numpy as np
 
-from Configs.Vehicle_Params import *
-
 # MPC 모델 파라미터들
 mpc_default_params = {
     "v_soc_high":           92,     # SOC 기반 속도 조절
@@ -36,6 +34,7 @@ def mpc_speed(step, params, const):
     pack  = const["pack"]
     race  = const["race"]
     drive = const["drive"]
+    simpara = const["simpara"]
 
     # 차량 헤딩 기준 풍향/속 결정
     headwind = step["wind_speed"] * m.cos(m.radians(step["wind_direction"] - step["vehicle_heading"]))

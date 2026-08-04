@@ -1,0 +1,168 @@
+================================================================
+향후 개선 과제 백로그 (2026-08-05 기준 최신, progress/33·35 대체)
+================================================================
+[ 이 파일의 번호는 항상 progress/ 폴더의 가장 끝 번호로 유지할 것 -
+  완료된 항목은 여기서 지우고 progress/NN_주제.txt로 번호를 이어
+  붙여 별도 파일로 옮긴다. 새 항목이 생겨 이 파일을 다시 갱신할
+  때는 이 파일 자체를 다음 번호로 새로 저장하고 이전 버전은 삭제한다.
+  (2026-08-05: 서로 다른 세션이 같은 날 35와 37을 각각 백로그로
+  만들어버려서 이 파일로 병합함 - 백로그는 항상 하나만 유지할 것.) ]
+
+[ 참고 - 작업 방식이 바뀌었음 (중요) ]
+2026-08-03부터 컴퓨터 간 인계가 **ZIP 압축이 아니라 GitHub 레포
+(https://github.com/Dorolong/WSC_Project)** 기준으로 바뀜. 레포 루트의
+AGENTS.md(Codex용 지시사항)에 그렇게 명시돼 있음. 반면 CLAUDE.md는
+아직 "작업 환경 변경 = ZIP 압축" 절차를 그대로 담고 있어서 **두 문서가
+서로 다른 방식을 지시하는 상태** - 정리 필요(아래 3순위 참고).
+또한 2026-08-03~04 작업(progress/34)은 코드만 GitHub 웹 업로드로
+올라오고 progress/ 문서가 안 남아서, 2026-08-05에 코드를 역으로 읽어
+사후 정리해야 했음. **작업 후 문서화를 같은 세션에서 끝낼 것.**
+
+[ 참고 - 배포 관련 실수, 재발 방지 ]
+2026-08-02: 기능을 로컬에 구현·테스트까지 다 해놓고 git push를 깜빡해서
+사용자가 "기능이 안 보인다"고 문의할 때까지 몰랐음. **기능 구현 완료 후
+커밋·푸시까지 끝내고 나서 "완료했다"고 보고할 것** - 특히 "SQL 먼저
+실행해달라" 같은 사용자 액션 대기 중간단계가 있으면 더 주의.
+
+[ 다른 컴퓨터/세션에서 이어서 시작할 때 여기부터 읽을 것 ]
+완료된 것: run_simulation() 함수분리(6/6)+A/B검증, simpara.a 동적화+LV2
+momentum, dist_vals 성능버그(4.2배), 실제 2025 BWSC 속도제한/신호등
+데이터, Optuna 날씨섭동 CS구간 상관화, 지형 세그먼트 전처리(read_path),
+GitHub+Streamlit Cloud 배포, Supabase 로그인/닉네임/기록저장, 종료사유
+추적+규칙기반 결과분석, 차량제원 전역상태 격리 버그수정(cfg), 차량제원
+계정 저장/불러오기, 릴리즈노트+튜토리얼 팝업, **Optuna 웹 런처(오라클
+서버)+앱 연동+simpara 세션격리+자동로그인+코드보기(progress/34)**,
+**mpc_controller.py simpara 전역참조 제거(progress/36)**.
+(완료 이력: progress/13~17, 19~22, 24~26, 28, 30, 32, 34, 36)
+코드 최신 상태 요약은 progress/07(Vehicle_Function.py), progress/08
+(mpc_controller.py) 참고.
+**run_simulation()/mpc_speed() 시그니처에 cfg/const 인자가 있음 -
+직접 호출하는 코드를 새로 작성할 때 최신 시그니처 확인 필수
+(progress/28).**
+**앱에 버전 개념이 있음(app.py의 RELEASE_NOTES/APP_VERSION, 현재
+v1.0.8) - 사용자가 체감할 새 기능을 배포할 때마다 리스트 맨 앞에
+항목 추가하고 버전 올릴 것.**
+**앱이 2개로 분리돼 있음**: Streamlit Cloud(app.py, 단일 시뮬레이션) +
+오라클 서버(server/, Optuna 탐색 런처). 둘이 같은 Supabase를 공유.
+
+**지금 이어서 할 일 1순위 - Optuna 웹 런처 실제 동작 검증**
+server/README.md에 명시된 대로, 원 작업이 인터넷 없는 환경에서 이뤄져
+**fastapi/uvicorn을 실제로 띄워본 적이 없음**. 다음을 눈으로 확인:
+1. 오라클 서버에서 `uvicorn server.main:app --host 0.0.0.0 --port 8000`
+   기동 -> 브라우저 접속(포트 8000 Security List 개방 필요)
+2. Supabase 계정 로그인 -> 탐색 시작 -> 진행률(N/전체)이 올라가는지 ->
+   완료 후 Streamlit 앱 사이드바 "내 Optuna 탐색 결과"에 뜨는지 ->
+   "이 파라미터로 시뮬레이션하기"까지 이어지는지
+3. Streamlit 앱 신규 기능(자동 로그인, 코드 보기)도 배포본에서 확인
+4. 문제 없으면 systemd 등록(server/README.md 절차)
+
+**2순위 - MPC 물리 building block 완성 (설계 완료, progress/22 스펙)**
+1. [완료] 내리막 세그먼트 경계 배열 추출 - scripts/main.py 112~130줄.
+   **단 app.py에는 아직 같은 전처리가 없고**, 아래 2번이 없어서 실제로는
+   계산만 하고 미사용 상태.
+2. compute_downhill_cap(step, const) (Vehicle_Function.py, 사용자 직접
+   작성): 세그먼트 진입 전 목표속도 상한 계산.
+   a_coast=(F_aero+F_roll+F_slope)/mass,
+   v_entry_max = sqrt(v_exit_cap² - 2·a_coast·L).
+   mpc_speed()에서 speed_limit과 같은 방식으로 v=min(v, downhill_v_cap).
+   **physics/drive는 전역이 아니라 const["physics"], const["drive"]에서
+   읽을 것 - progress/28 이후 구조.** 이게 되면 세그먼트 배열을 const에
+   실어 넘겨야 하고, app.py에도 같은 전처리 추가 필요.
+3. CS 접근 코스팅/제동 (Vehicle_Function.py, mpc_controller.py, 사용자
+   직접 작성): coast_distance=v²/(2·a_coast) 트리거로 가속 해제,
+   내리막 등 a_coast<=0 구간은 simpara.decel_brake로 같은 공식.
+   코스팅/기계제동 중 P_batt는 power.P_LV_race만 반영(배터리 안 거침).
+4. [완료] simpara.decel_brake 상수 추가됨(Vehicle_Params.py 193줄,
+   0.7g) + app.py "시뮬레이션 설정" 탭에서 편집 가능. **단 아직 물리
+   로직 어디에서도 안 씀** - 위 3번에서 사용 예정.
+5. 위가 다 되면: light_arrive() 단위 불일치 버그 수정(아래), 그 다음
+   본격 Optuna 재탐색(이제 웹 런처로 돌릴 수 있음. CLI로 돌릴 거면
+   scripts/main.py의 run_cli()가 아직 스모크테스트 설정 - n_trials=2,
+   study_name="WSC_MPC_Opt_test", storage=".../optuna_study_test.db" -
+   이므로 n_trials=50, "WSC_MPC_Opt", "sqlite:///outputs/optuna_study.db"
+   로 되돌릴 것).
+
+[ 알려진 버그 - 미수정 ]
+1. **light_arrive() 단위 불일치** (progress/20 상세): 호출부가 넘기는
+   step["curr_dist"]는 미터인데 light_dists는 km라 비교가 항상 실패 ->
+   신호등 지연이 사실상 발동 안 함. 사용자가 보류 결정(2026-07-20).
+   (참고: mpc_controller.py의 simpara 전역참조 버그는 2026-08-05에
+   수정 완료 - progress/36)
+
+[ 3순위 - 문서/인프라 정리 ]
+1. **CLAUDE.md와 AGENTS.md 불일치 정리**: CLAUDE.md는 ZIP 기반 "작업
+   환경 변경" 절차, AGENTS.md는 Git 기반. 실제 운용은 Git 기반이므로
+   CLAUDE.md를 그에 맞게 고칠지 사용자 확인 필요. (AGENTS.md는 현재
+   로컬에만 있고 아직 커밋 안 됨 - 커밋 여부도 같이 결정할 것.)
+2. **optuna_runs 테이블 SQL이 레포에 없음**: server/study_runner.py가
+   쓰는 컬럼(study_name 고유, user_id, n_trials_completed,
+   n_trials_target, best_value, best_params jsonb, status,
+   termination_reason, updated_at)만 코드에서 역추적 가능한 상태.
+   SETUP.md에 이 테이블 + RLS 정책 SQL을 기존 simulation_runs/
+   user_settings처럼 정리해둘 것(Supabase 재구축 시 필요).
+3. SETUP.md에 server/ 배포 절차 링크 추가(현재 server/README.md에만
+   있음).
+4. 서버 보안: server/main.py의 CORS가 allow_origins=["*"]이고 Supabase
+   anon key가 소스에 하드코딩(공개 레포). anon key는 RLS 전제하에
+   공개돼도 되는 값이라 당장 위험하진 않지만 노출 범위 검토.
+5. 서버 재시작 시 진행 중이던 탐색 상태가 사라짐(RUNS/QUEUE가 메모리
+   전용). 완료 결과는 파일+Supabase에 남으므로 치명적이진 않음.
+
+[ 4순위 - 예전부터 보류 중이던 항목 ]
+1. 속도값 정수(int) 출력 반영 - 내부 계산은 float 유지, 반올림은
+   results.append() 시점에만. 결정만 되고 미반영.
+2. momentum_gain을 Optuna 탐색공간에 넣을지 - 본 탐색 재실행 때 결정.
+3. (선택) mpc_speed()의 np.clip() 스칼라 호출을 max()/min()으로 교체.
+4. termination_reason을 objective() 스코어링에 활용할지 검토 - 현재는
+   받기만 하고 안 씀. 실격 유형별로 다른 페널티를 주면 탐색이 더
+   정교해질 수 있음.
+5. Optuna 트라이얼 병렬화 - 웹 런처가 프로세스 분리로 이미 부분 해결.
+   서버 사양을 올리면 WSC_MAX_CONCURRENT를 올리는 것으로 확장 가능.
+
+[ 방향 메모 - 룰베이스 -> 비용함수 MPC 전환 ]
+현재 전략은 룰베이스 기반 MPC를 먼저 물리적으로 말이 되게 완성한 뒤,
+각 룰 항을 비용함수와 제약조건으로 재구성하는 것. LV4의 균등 SOC
+배분 문제는 인지하고 있지만 당장 삭제하지 않고, building block 검증
+후 비용함수 전환 단계에서 다시 설계한다.
+없는 것: 명시적 예측 모델 기반 수치 최적화(매 스텝 비용함수를 실제로
+풂), 명시적 objective function, 제약조건을 최적화 내부에서 다루는 것
+(현재는 soc_cutoff/v_max/speed_limit 전부 사후 클리핑).
+있는 것: receding horizon(매 스텝 상태 재측정 후 재계산), 상태 피드백,
+부분적 예측(avg_gen_ratio, slope_ahead).
+오르막은 배터리 I²R 손실 기반 비용항으로, energy_crit의 균등배분
+가정도 지형 기반 1회성 예산 배분으로 재설계 예정(progress/22).
+
+[ 참고 - 아키텍처 관련 결정 사항 ]
+- GitHub Pages 프론트 + Supabase 백엔드는 무거운 Python 연산이 핵심인
+  이 프로젝트엔 안 맞아 기각, Streamlit Cloud 배포로 결정.
+- Streamlit Cloud에서 Optuna 탐색을 돌리는 것도 기각(무료 티어 리소스
+  한계 + 여러 사용자가 서버 프로세스 공유) -> 오라클 서버에 별도 런처
+  분리로 해결(progress/34).
+- 결과 AI 분석(Claude API 연동)은 실제 과금 문제로 기각, 규칙 기반
+  분석(progress/26)으로 대체 완료.
+- 앱 안에서 코드 수정 후 즉시 배포 반영은 보안 위험으로 기각. 대신
+  읽기 전용 "코드 보기"(GitHub raw 조회)로 대체(progress/34).
+- Supabase 대시보드의 MCP 연동은 논의만 하고 보류(2026-08-02).
+
+[ 완료 이력 (이 백로그에서 빠진 완료 항목들의 위치) ]
+- progress/13: v_rate_limiting -> 댐퍼(EMA+tanh) 전환 (2026-07-18)
+- progress/14: run_simulation() 함수 분리 6/6 (2026-07-20)
+- progress/15: 함수분리 중 발견된 크래시 버그 모음 (2026-07-20)
+- progress/16: simpara.a 동적화 + LV2 momentum 결합 (2026-07-20)
+- progress/17: dist_vals pandas Index 성능버그 수정, 4.2배 (2026-07-20)
+- progress/19: 함수분리 리팩터링 A/B 비교 검증 (2026-07-20)
+- progress/20: 실제 2025 BWSC 속도제한/신호등 데이터 반영 (2026-07-20)
+- progress/21: Optuna 날씨 섭동 CS구간 상관화 (2026-07-20)
+- progress/22: MPC 비용함수 전환 방향 + 지형 세그먼트 전처리
+  (2026-07-20) - read_path()만 완료, 나머지는 위 2순위 참고
+- progress/24: GitHub 레포 생성 + Streamlit Cloud 배포 (2026-08-02)
+- progress/25: Supabase 로그인 + 기록 저장/조회 (2026-08-02)
+- progress/26: 종료 사유 추적 + 규칙 기반 결과 분석 (2026-08-02)
+- progress/28: 차량 제원 전역상태 격리 버그수정(cfg) (2026-08-02)
+- progress/30: 차량 제원 계정 저장/불러오기 (2026-08-02)
+- progress/32: 릴리즈 노트 + 첫 로그인 튜토리얼 팝업 (2026-08-02)
+- progress/34: Optuna 웹 런처(오라클) + 앱 연동 + simpara 세션격리 +
+  자동 로그인 + 코드 보기 (2026-08-03~04, 문서는 08-05 사후 정리)
+- progress/36: mpc_controller.py simpara 전역참조 제거 - 세션 cfg의
+  max_v_delta가 속도 댐퍼에 실제로 반영되게 수정 (2026-08-05)
+================================================================
