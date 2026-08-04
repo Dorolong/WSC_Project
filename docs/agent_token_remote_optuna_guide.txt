@@ -1,0 +1,409 @@
+================================================================
+Codex 자동 실행용 Optuna 원격 런처 구현 가이드
+================================================================
+작성일: 2026-08-05
+목적:
+  Oracle 서버에 올라간 WSC Optuna 웹 런처를 사람이 웹에서 누르는 방식뿐
+  아니라, Codex/CLI가 직접 백그라운드로 시작/조회/대기/취소할 수 있게
+  만드는 절차를 정리한다.
+
+핵심 방향:
+  Supabase 계정 아이디/비밀번호를 Codex에게 넘기지 않는다.
+  대신 Oracle FastAPI 서버에 자동화 전용 토큰(WSC_AGENT_TOKEN)을 두고,
+  Codex/CLI는 그 토큰으로 제한된 API만 호출한다.
+
+
+================================================================
+1. 목표 구조
+================================================================
+
+현재 구조:
+  사용자 브라우저
+    -> Supabase 로그인
+    -> Authorization: Bearer <Supabase access token>
+    -> Oracle FastAPI server
+    -> study_runner.py subprocess
+    -> Supabase optuna_runs / result json 저장
+
+추가할 구조:
+  Codex 또는 로컬 CLI
+    -> Authorization: Bearer <WSC_AGENT_TOKEN>
+    -> Oracle FastAPI server
+    -> study_runner.py subprocess
+    -> result json 파일 조회
+
+중요:
+  사람용 로그인 경로는 그대로 둔다.
+  agent token은 Optuna 실행/조회/취소 같은 제한된 작업만 허용한다.
+
+
+================================================================
+2. 수정 대상 파일
+================================================================
+
+주요 수정:
+  server/main.py
+    - WSC_AGENT_TOKEN 환경변수 읽기
+    - verify_actor() 추가
+    - /api/runs, /api/runs/{run_id}가 user/agent 둘 다 받게 수정
+    - /api/runs/{run_id}/cancel 추가
+
+  server/study_runner.py
+    - agent 실행일 때 Supabase access token이 없다는 점 처리
+    - 1차 구현은 agent 실행 결과를 파일 JSON으로만 저장해도 됨
+
+  scripts/remote_optuna.py
+    - 새 파일
+    - start/status/wait/result/cancel 명령 제공
+
+선택 수정:
+  server/README.md
+    - WSC_AGENT_TOKEN 설정 및 CLI 사용법 추가
+
+  SETUP.md
+    - 서버 환경변수/배포 절차 링크 추가
+
+
+================================================================
+3. 1단계 - Oracle 서버에 WSC_AGENT_TOKEN 만들기
+================================================================
+
+Oracle 서버 SSH 접속 후:
+
+  openssl rand -hex 32
+
+출력 예:
+
+  9f0c...64자리...ab12
+
+이 값을 WSC_AGENT_TOKEN으로 사용한다.
+
+주의:
+  이 값은 Git에 커밋하지 않는다.
+  채팅/문서/progress 파일에도 실제 값을 남기지 않는다.
+  유출 의심 시 새로 발급해서 교체한다.
+
+systemd 서비스에 환경변수 추가:
+
+  sudo nano /etc/systemd/system/wsc-launcher.service
+
+[Service] 아래에 추가:
+
+  Environment=WSC_AGENT_TOKEN=여기에_랜덤토큰
+
+적용:
+
+  sudo systemctl daemon-reload
+  sudo systemctl restart wsc-launcher
+  sudo systemctl status wsc-launcher
+
+
+================================================================
+4. 2단계 - server/main.py에 verify_actor() 추가
+================================================================
+
+현재 server/main.py에는 Supabase access token을 검증하는 verify_user()가 있다.
+이 함수는 그대로 두고, 그 위에 agent token과 Supabase user를 모두 처리하는
+verify_actor()를 추가한다.
+
+개념 코드:
+
+  AGENT_TOKEN = os.getenv("WSC_AGENT_TOKEN", "")
+
+  def verify_actor(authorization: str | None):
+      if not authorization or not authorization.startswith("Bearer "):
+          raise HTTPException(status_code=401, detail="인증이 필요해요.")
+
+      token = authorization.removeprefix("Bearer ").strip()
+
+      if AGENT_TOKEN and token == AGENT_TOKEN:
+          return {
+              "kind": "agent",
+              "id": "codex-agent",
+              "email": "codex-agent@local",
+              "nickname": "Codex",
+              "access_token": None,
+          }
+
+      user = verify_user(authorization)
+      return {
+          "kind": "user",
+          "id": user.get("id"),
+          "email": user.get("email"),
+          "nickname": (user.get("email") or "user").split("@")[0],
+          "access_token": token,
+      }
+
+주의:
+  verify_user()를 삭제하지 않는다.
+  기존 웹 UI는 Supabase access token 경로를 계속 사용한다.
+
+
+================================================================
+5. 3단계 - /api/runs 생성 API가 agent를 받게 수정
+================================================================
+
+현재 흐름:
+  create_run(payload, authorization)
+    -> verify_user(authorization)
+    -> access_token = authorization.removeprefix(...)
+    -> RUNS[run_id]에 user_id/access_token 저장
+    -> study_runner.py <study_name> <n_trials> <user_id> <access_token>
+
+수정 방향:
+  verify_user() 대신 verify_actor() 사용.
+  actor["kind"]가 agent면 access_token은 None 또는 특수 문자열로 저장.
+
+개념 코드:
+
+  actor = verify_actor(authorization)
+  user_id = actor["id"]
+  nickname = actor["nickname"]
+  access_token = actor["access_token"] or "AGENT_FILE_ONLY"
+
+  RUNS[run_id] = {
+      "user_id": user_id,
+      "nickname": nickname,
+      "access_token": access_token,
+      ...
+  }
+
+study_runner.py 호출은 처음에는 기존 인자 구조를 유지해도 된다:
+
+  [sys.executable, STUDY_RUNNER,
+   run["study_name"], str(run["n_trials"]),
+   run["user_id"], run["access_token"]]
+
+agent 실행이면 마지막 인자가 "AGENT_FILE_ONLY"가 된다.
+
+
+================================================================
+6. 4단계 - /api/runs/{run_id} 조회 API 권한 수정
+================================================================
+
+현재는 verify_user() 후 run["user_id"]와 Supabase user id가 같은지 본다.
+
+수정:
+  actor = verify_actor(authorization)
+  run["user_id"] == actor["id"]인지 확인한다.
+
+개념 코드:
+
+  actor = verify_actor(authorization)
+
+  with LOCK:
+      run = RUNS.get(run_id)
+      if not run:
+          raise HTTPException(status_code=404, detail="해당 실행을 찾을 수 없어요.")
+      if run["user_id"] != actor["id"]:
+          raise HTTPException(status_code=403, detail="본인의 실행만 조회할 수 있어요.")
+
+이렇게 하면:
+  Supabase 사용자는 자기 run만 조회.
+  Codex agent는 user_id == "codex-agent"인 run만 조회.
+
+
+================================================================
+7. 5단계 - study_runner.py에서 AGENT_FILE_ONLY 처리
+================================================================
+
+현재 study_runner.py는 access_token을 받아 Supabase optuna_runs에 checkpoint를
+upsert한다.
+
+agent token은 Supabase access token이 아니므로 그대로 Supabase REST API에
+넣으면 실패한다.
+
+1차 구현 추천:
+  access_token == "AGENT_FILE_ONLY"이면 push_checkpoint()를 건너뛴다.
+  result json/progress json 파일은 계속 저장한다.
+
+개념 코드:
+
+  def should_push_supabase(access_token):
+      return access_token and access_token != "AGENT_FILE_ONLY"
+
+  if should_push_supabase(access_token):
+      push_checkpoint(...)
+
+주의:
+  최종 result json 저장은 agent/user 모두 유지한다.
+  나중에 Streamlit 앱과 agent 결과를 연결하고 싶으면 Supabase service role
+  key를 별도로 설계한다. 처음부터 service role key를 넣는 것은 보안상
+  부담이 크다.
+
+
+================================================================
+8. 6단계 - 취소 API 추가
+================================================================
+
+Codex가 백그라운드 job을 직접 돌리려면 취소 기능이 필요하다.
+
+server/main.py에 추가할 API:
+
+  @app.post("/api/runs/{run_id}/cancel")
+  def cancel_run(run_id: str, authorization: str | None = Header(default=None)):
+      actor = verify_actor(authorization)
+
+      with LOCK:
+          run = RUNS.get(run_id)
+          if not run:
+              raise HTTPException(status_code=404, detail="해당 실행을 찾을 수 없어요.")
+          if run["user_id"] != actor["id"]:
+              raise HTTPException(status_code=403, detail="본인의 실행만 취소할 수 있어요.")
+
+          if run["status"] == "queued":
+              if run_id in QUEUE:
+                  QUEUE.remove(run_id)
+              run["status"] = "cancelled"
+              _try_start_next()
+              return {"run_id": run_id, "status": "cancelled"}
+
+          if run["status"] == "running":
+              proc = run.get("process")
+              if proc and proc.poll() is None:
+                  proc.terminate()
+              run["status"] = "cancelled"
+              _try_start_next()
+              return {"run_id": run_id, "status": "cancelled"}
+
+          return {"run_id": run_id, "status": run["status"]}
+
+
+================================================================
+9. 7단계 - scripts/remote_optuna.py CLI 추가
+================================================================
+
+새 파일:
+  scripts/remote_optuna.py
+
+환경변수:
+  WSC_OPTUNA_SERVER_URL=http://141.147.167.152:8000
+  WSC_AGENT_TOKEN=서버와_같은_agent_token
+
+명령:
+  python scripts/remote_optuna.py start --trials 50
+  python scripts/remote_optuna.py status <run_id>
+  python scripts/remote_optuna.py wait <run_id>
+  python scripts/remote_optuna.py result <run_id>
+  python scripts/remote_optuna.py cancel <run_id>
+
+구현 개념:
+
+  import argparse, os, time, requests
+
+  BASE_URL = os.environ["WSC_OPTUNA_SERVER_URL"].rstrip("/")
+  TOKEN = os.environ["WSC_AGENT_TOKEN"]
+
+  def headers():
+      return {
+          "Content-Type": "application/json",
+          "Authorization": f"Bearer {TOKEN}",
+      }
+
+  def start(args):
+      resp = requests.post(
+          f"{BASE_URL}/api/runs",
+          json={"n_trials": args.trials},
+          headers=headers(),
+          timeout=30,
+      )
+      resp.raise_for_status()
+      print(resp.json())
+
+  def status(args):
+      resp = requests.get(
+          f"{BASE_URL}/api/runs/{args.run_id}",
+          headers=headers(),
+          timeout=30,
+      )
+      resp.raise_for_status()
+      print(resp.json())
+
+  def wait(args):
+      while True:
+          resp = requests.get(
+              f"{BASE_URL}/api/runs/{args.run_id}",
+              headers=headers(),
+              timeout=30,
+          )
+          resp.raise_for_status()
+          data = resp.json()
+          print(data)
+          if data.get("status") in ("done", "error", "cancelled"):
+              break
+          time.sleep(args.interval)
+
+  def cancel(args):
+      resp = requests.post(
+          f"{BASE_URL}/api/runs/{args.run_id}/cancel",
+          headers=headers(),
+          timeout=30,
+      )
+      resp.raise_for_status()
+      print(resp.json())
+
+필요 패키지:
+  requests
+
+이미 requirements에 없으면 루트 requirements.txt 또는 별도 안내에 추가.
+
+
+================================================================
+10. 8단계 - 테스트 순서
+================================================================
+
+서버에서:
+
+  sudo systemctl restart wsc-launcher
+  sudo journalctl -u wsc-launcher -f
+
+로컬 또는 Codex 실행 환경에서:
+
+  $env:WSC_OPTUNA_SERVER_URL="http://141.147.167.152:8000"
+  $env:WSC_AGENT_TOKEN="실제_agent_token"
+
+  python scripts/remote_optuna.py start --trials 1
+
+출력에서 run_id 확인:
+
+  python scripts/remote_optuna.py status <run_id>
+  python scripts/remote_optuna.py wait <run_id>
+
+성공 기준:
+  - queued 또는 running 상태가 보임
+  - completed trial 수가 증가
+  - 마지막에 done 또는 error가 명확히 반환
+  - done이면 result에 best_params가 포함
+  - cancel 명령을 running/queued 상태에서 호출하면 cancelled 처리
+
+
+================================================================
+11. 보안 체크리스트
+================================================================
+
+- WSC_AGENT_TOKEN은 최소 32바이트 이상 랜덤값.
+- Git, progress 문서, README, 채팅에 실제 토큰 값 기록 금지.
+- agent token은 Optuna 실행/조회/취소만 허용.
+- user_settings, simulation_runs 삭제/수정 같은 admin 기능 연결 금지.
+- 가능하면 Oracle Security List에서 접근 IP 제한.
+- 유출 의심 시 토큰 재발급 후 systemd 환경변수 교체.
+- SUPABASE_SERVICE_ROLE_KEY는 처음 단계에서는 쓰지 않는다.
+
+
+================================================================
+12. 다음 작업 권장 순서
+================================================================
+
+1. server/main.py에 WSC_AGENT_TOKEN / verify_actor() 추가.
+2. /api/runs, /api/runs/{run_id}를 verify_actor() 기반으로 수정.
+3. study_runner.py에서 "AGENT_FILE_ONLY"일 때 Supabase checkpoint skip.
+4. /api/runs/{run_id}/cancel 추가.
+5. scripts/remote_optuna.py 추가.
+6. Oracle 서버 systemd에 WSC_AGENT_TOKEN 추가.
+7. --trials 1로 smoke test.
+8. --trials 5 정도로 wait/result 확인.
+9. 안정화 후 필요하면 agent 결과를 Supabase/Streamlit 앱에 표시하는 2차 설계.
+
+================================================================
+끝.
+================================================================

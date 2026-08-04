@@ -673,11 +673,6 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
 
         # DY, HR로 행 생성
         state_env_row = get_env_row_with_fallback(nearest_diff, DY, HR, step, const)
-        if False:
-            # 스킵 전 i += 1
-            i += 1
-            continue
-
         # 스킵 전 i += 1
         i += 1
 
