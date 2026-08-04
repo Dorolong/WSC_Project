@@ -1,5 +1,5 @@
 ================================================================
-향후 개선 과제 백로그 (2026-08-05 기준 최신, progress/33·35 대체)
+향후 개선 과제 백로그 (2026-08-05 기준 최신, progress/33·35·37 대체)
 ================================================================
 [ 이 파일의 번호는 항상 progress/ 폴더의 가장 끝 번호로 유지할 것 -
   완료된 항목은 여기서 지우고 progress/NN_주제.txt로 번호를 이어
@@ -78,19 +78,28 @@ server/README.md에 명시된 대로, 원 작업이 인터넷 없는 환경에�
 4. [완료] simpara.decel_brake 상수 추가됨(Vehicle_Params.py 193줄,
    0.7g) + app.py "시뮬레이션 설정" 탭에서 편집 가능. **단 아직 물리
    로직 어디에서도 안 씀** - 위 3번에서 사용 예정.
-5. 위가 다 되면: light_arrive() 단위 불일치 버그 수정(아래), 그 다음
-   본격 Optuna 재탐색(이제 웹 런처로 돌릴 수 있음. CLI로 돌릴 거면
+5. [완료] light_arrive() 단위 불일치 버그 수정(progress/39) - 이제
+   실제로 신호등 지연이 발동함(43개 감지, 중복 방지 확인).
+6. 위가 다 되면 본격 Optuna 재탐색(이제 웹 런처로 돌릴 수 있음. CLI로 돌릴 거면
    scripts/main.py의 run_cli()가 아직 스모크테스트 설정 - n_trials=2,
    study_name="WSC_MPC_Opt_test", storage=".../optuna_study_test.db" -
    이므로 n_trials=50, "WSC_MPC_Opt", "sqlite:///outputs/optuna_study.db"
    로 되돌릴 것).
 
-[ 알려진 버그 - 미수정 ]
-1. **light_arrive() 단위 불일치** (progress/20 상세): 호출부가 넘기는
-   step["curr_dist"]는 미터인데 light_dists는 km라 비교가 항상 실패 ->
-   신호등 지연이 사실상 발동 안 함. 사용자가 보류 결정(2026-07-20).
-   (참고: mpc_controller.py의 simpara 전역참조 버그는 2026-08-05에
-   수정 완료 - progress/36)
+[ 알려진 버그 ]
+현재 미해결로 추적 중인 버그 없음.
+2026-08-05에 다음 두 건이 해결됨:
+- mpc_controller.py simpara 전역참조 (progress/36)
+- light_arrive() 단위 불일치 (progress/39) - 오래 보류돼 있던 항목.
+  이제 prev_dist~curr_dist 구간 안에 신호등이 들어오면 감지하는
+  방식이라 route point가 신호등을 정확히 찍지 않아도 발동함.
+
+[ 다음 단계 - Codex 자동 실행용 원격 Optuna 런처 (설계 완료, 미구현) ]
+docs/agent_token_remote_optuna_guide.txt에 전체 절차가 정리돼 있음
+(progress/41). Supabase 계정 비밀번호 공유 대신 agent token + API +
+CLI 방식으로 가는 구조 - 서버 WSC_AGENT_TOKEN 설정, verify_actor()
+추가, /api/runs 계열 수정, study_runner AGENT_FILE_ONLY 처리,
+scripts/remote_optuna.py CLI 신설 순서. 실제 구현은 아직 안 됨.
 
 [ 3순위 - 문서/인프라 정리 ]
 1. [완료 2026-08-05] CLAUDE.md/AGENTS.md 불일치 정리 + README 재구성
@@ -166,4 +175,12 @@ server/README.md에 명시된 대로, 원 작업이 인터넷 없는 환경에�
   자동 로그인 + 코드 보기 (2026-08-03~04, 문서는 08-05 사후 정리)
 - progress/36: mpc_controller.py simpara 전역참조 제거 - 세션 cfg의
   max_v_delta가 속도 댐퍼에 실제로 반영되게 수정 (2026-08-05)
+- progress/38: run_simulation() 야간 경계 선처리 (2026-08-05)
+- progress/39: 주행에너지 계산을 CS/신호등보다 앞으로 이동, env_row
+  누락 fallback 추가(공짜 주행 제거), light_arrive() 단위/감지방식
+  수정 (2026-08-05)
+- progress/40: run_simulation() dead block(`if False:`) 정리 (2026-08-05)
+- progress/41: Codex 자동 실행용 원격 Optuna 런처 구현 가이드 작성
+  (docs/agent_token_remote_optuna_guide.txt) (2026-08-05)
+- docs/: 총괄 기획안 PDF(15p) + 생성 스크립트 추가 (2026-08-05)
 ================================================================

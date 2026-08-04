@@ -14,7 +14,7 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 > | 문서 | 역할 |
 > |---|---|
 > | `README.md` | 전체 요약 — 구조·원리·현재 상태·다음 할 일 (**여기서 시작**) |
-> | `progress/37_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
+> | `progress/42_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
 > | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
 > | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
 > | `SETUP.md` | 다른 컴퓨터에서 환경 재현하는 방법 |
@@ -146,6 +146,16 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 
 ### 최근 완료된 것
 
+- **run_simulation() 한 사이클 계산 순서 정리** — ① 야간 경계 선처리(주행 불가
+  시간이면 속도·에너지 계산을 건너뛰고 다음날 08:00으로 점프), ② 주행 에너지/SOC
+  계산을 CS·신호등 이벤트보다 앞으로 이동("달려서 도착한 뒤 정차/충전" 순서),
+  ③ `env_row` 누락 시 인접 시간 fallback 추가(에너지 계산을 건너뛰던 '공짜 주행'
+  제거), ④ `light_arrive()` 단위/감지방식 수정 (`progress/38`, `39`, `40`)
+- **[버그 수정] `light_arrive()` 단위 불일치** — 미터와 km를 비교해 신호등 지연이
+  한 번도 발동하지 않던 오래된 버그. 이제 이전~현재 구간 안에 신호등이 들어오면
+  감지하는 방식이라 경로 포인트가 신호등을 정확히 찍지 않아도 동작 (`progress/39`)
+- **총괄 기획안 PDF** — 설계·구현·운영 전반을 정리한 15페이지 문서
+  ([`docs/`](docs/), 생성 스크립트 포함)
 - **Optuna 웹 런처(오라클) + 앱 연동** — Streamlit Cloud 무료 티어로는 탐색을 못
   돌린다는 제약을 별도 FastAPI 서버 분리로 해결. 대기열·진행률·체크포인트·디스크
   로테이션까지 구현. 앱 사이드바 "내 Optuna 탐색 결과"에서 결과 조회 및 적용
@@ -169,7 +179,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 
 ## 4. 다음에 할 일
 
-> 자세한 내용은 [`progress/37_향후_개선_과제_백로그.txt`](progress/37_향후_개선_과제_백로그.txt)
+> 자세한 내용은 [`progress/42_향후_개선_과제_백로그.txt`](progress/42_향후_개선_과제_백로그.txt)
 
 ### 1순위 — Optuna 웹 런처 실제 동작 검증
 서버 코드가 인터넷 없는 환경에서 작성돼 **한 번도 실제로 띄워본 적이 없습니다.**
@@ -190,8 +200,8 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 - [ ] CS 접근 코스팅/제동 구현 (`coast_distance = v²/(2·a_coast)`, `simpara.decel_brake`)
 - [x] `simpara.decel_brake` 상수 추가(0.7g) + 앱에서 편집 가능
       — **단 아직 물리 로직에서 미사용**
-- [ ] `light_arrive()` 단위 불일치 버그 수정 (미터 vs km — 신호등 지연 미발동,
-      수정 보류 중으로 결정)
+- [x] `light_arrive()` 단위 불일치 버그 수정 — 이제 실제로 신호등 지연이 발동
+      (43개 감지·중복 방지 확인, `progress/39`)
 - [ ] 위가 끝나면 본격 Optuna 재탐색 (웹 런처로 실행 가능. CLI로 돌릴 거면
       `run_cli()`가 아직 스모크테스트 설정이라 `n_trials=50`,
       `study_name="WSC_MPC_Opt"`, `storage="sqlite:///outputs/optuna_study.db"`로 원복 필요)
@@ -266,6 +276,10 @@ assets/             정적 자산
 outputs/            시뮬레이션 결과물 + Optuna DB
   env_data.csv        305좌표 × 8일 × 12시간 = 29,280행
   optuna_study.db     Optuna study DB (재탐색 전이라 현재 없음, 최초 실행 시 생성)
+docs/               문서
+  WSC_DriveEff_총괄기획안.pdf   설계·구현·운영 전반 총괄 기획안 (15p)
+  make_plan_pdf.py              위 PDF 생성 스크립트 (pip install reportlab 필요)
+  agent_token_remote_optuna_guide.txt   Codex 자동 실행용 원격 런처 구현 가이드
 progress/           진행상황 주제별 정리 (가장 큰 번호 = 최신 백로그)
 debug_logs/         버그 추적·디버깅 과정 기록 ((YYYY-MM-DD)_주제.txt)
 app.py              Streamlit 웹 시뮬레이터
