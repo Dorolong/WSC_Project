@@ -357,6 +357,12 @@ def calender_handler(Accum_s):
     
     return {"Action": "Go", "Accum_s": Accum_s, "DY": DY, "HR": HR, "total_s": total_s}
 
+def seconds_until_drive_window_end(Accum_s):
+    total_s = 8 * 3600 + Accum_s
+    day_offset = int(total_s // 86400)
+    day_end_s = day_offset * 86400 + 17 * 3600
+    return max(0.0, day_end_s - total_s)
+
 def control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data, const):
 
     # 설정값 선언
@@ -423,9 +429,38 @@ def compute_vehicle_energy(step, soc, env_row, dt, const):
 
     return soc, prev_V_terminal, prev_wind_speed, prev_wind_dir, prev_heading
 
-def light_arrive(curr_dist, light_dists, visited_lights):
+def get_env_row_with_fallback(nearest_diff, DY, HR, step, const):
+    env_data = const["env_data"]
+    rad_max = const["rad_max"]
+
+    env_row = env_data.get((nearest_diff, DY, HR))
+    if env_row is not None:
+        return env_row
+
+    base_hour = DY * 24 + HR
+    for hour_offset in (-1, 1, -2, 2):
+        candidate_hour = base_hour + hour_offset
+        candidate_DY = candidate_hour // 24
+        candidate_HR = candidate_hour % 24
+        env_row = env_data.get((nearest_diff, candidate_DY, candidate_HR))
+        if env_row is not None:
+            return env_row
+
+    return {
+        "shortwave_radiation": step["gen_ratio"] * rad_max,
+        "shortwave_radiation_std": step["gen_ratio_std"] * rad_max,
+        "wind_speed_10m": step["wind_speed"],
+        "wind_direction_10m": step["wind_direction"],
+    }
+
+def light_arrive(prev_dist, curr_dist, light_dists, visited_lights):
+    prev_dist_km = prev_dist / 1000
+    curr_dist_km = curr_dist / 1000
+    lo, hi = sorted((prev_dist_km, curr_dist_km))
+    tolerance_km = 0.02
+
     for i, light_dist in enumerate(light_dists):
-        if i not in visited_lights and abs(curr_dist - light_dist) < 20:
+        if i not in visited_lights and lo - tolerance_km <= light_dist <= hi + tolerance_km:
             return i
     return None
 
@@ -513,6 +548,17 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
         )
 
     while i < n:
+        calender_result = calender_handler(Accum_s)
+        if calender_result["Action"] == "Stop":
+            termination_reason = calender_result.get("reason", "기간 초과")
+            break
+
+        Accum_s = calender_result["Accum_s"]
+        if calender_result["Action"] == "Reset_Go":
+            continue
+
+        DY, HR, total_s = calender_result["DY"], calender_result["HR"], calender_result["total_s"]
+
         step = dict(
             curr_dist       = route_dist[i],
             prev_dist       = route_dist[i - 1],
@@ -563,10 +609,16 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
 
         # 속도 업데이트
         step["v"] = mpc_speed(step, params, const)
-        prev_v = step["v"]
 
         # 구간 Delta Time [s]
         dt = step["delta_dist"] / step["v"]
+
+        drive_window_left = seconds_until_drive_window_end(Accum_s)
+        if drive_window_left <= 0 or dt >= drive_window_left:
+            Accum_s += drive_window_left
+            continue
+
+        prev_v = step["v"]
 
         # 시간 업데이트 및 야간 데이터 처리
         Accum_s += dt
@@ -585,6 +637,15 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
 
         # route 데이터를 10k resolution 데이터로 치환
         nearest_diff = nearest_map[step["curr_dist"]]
+        env_row = get_env_row_with_fallback(nearest_diff, DY, HR, step, const)
+
+        # Vehicle energy for this driven segment is settled before stop events.
+        soc, prev_V_terminal, prev_wind_speed, prev_wind_dir, prev_heading = compute_vehicle_energy(step, soc, env_row, dt, const)
+        prev_a = step["a"]
+
+        if soc < simpara.soc_hard_stop:
+            termination_reason = "諛고꽣由?SOC ?섑븳 ?꾨떖"
+            break
 
         cs_stop_result = control_stop_handler(step, total_s, drive_time_s, Accum_s, soc, visited_cs, last_cs_dist, last_cs_time, nearest_diff, env_data, const)
         if cs_stop_result["Action"] == "Fail":
@@ -602,7 +663,7 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
             last_cs_time    = cs_stop_result["last_cs_time"]
             prev_v          = 0
 
-        light_hit = light_arrive(step["curr_dist"], light_dists, visited_lights)
+        light_hit = light_arrive(step["prev_dist"], step["curr_dist"], light_dists, visited_lights)
         if light_hit is not None:
             visited_lights.add(light_hit)
             if light_types[light_hit] == "traffic_light":
@@ -611,8 +672,8 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
                 Accum_s += simpara.avg_pedestrian_light_delay
 
         # DY, HR로 행 생성
-        env_row = env_data.get((nearest_diff, DY, HR))
-        if env_row is None:
+        state_env_row = get_env_row_with_fallback(nearest_diff, DY, HR, step, const)
+        if False:
             # 스킵 전 i += 1
             i += 1
             continue
@@ -626,12 +687,12 @@ def run_simulation(params, route, env_data, dist_vals, nearest_map, rad_max, lig
             break
 
         # 일사량 업데이트
-        prev_radiation = env_row["shortwave_radiation"]
-        prev_radiation_std = env_row["shortwave_radiation_std"]
+        prev_radiation = state_env_row["shortwave_radiation"]
+        prev_radiation_std = state_env_row["shortwave_radiation_std"]
         
         # 차량 에너지 계산
-        soc, prev_V_terminal, prev_wind_speed, prev_wind_dir, prev_heading = compute_vehicle_energy(step, soc, env_row, dt, const)
-        prev_a = step["a"]
+        prev_wind_speed = state_env_row["wind_speed_10m"]
+        prev_wind_dir = state_env_row["wind_direction_10m"]
 
         # 진척율 표시
         if progress_cb and i % 100 == 0:
