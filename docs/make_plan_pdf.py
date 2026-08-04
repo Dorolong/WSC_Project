@@ -9,11 +9,14 @@
 아래 registerFont 경로만 바꾸면 됩니다.
 """
 import os
+import re
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import simpleSplit
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (BaseDocTemplate, Frame, PageTemplate, Paragraph,
@@ -25,6 +28,9 @@ os.makedirs(os.path.dirname(OUT), exist_ok=True)
 pdfmetrics.registerFont(TTFont("Malgun", r"C:\Windows\Fonts\malgun.ttf"))
 pdfmetrics.registerFont(TTFont("MalgunBd", r"C:\Windows\Fonts\malgunbd.ttf"))
 pdfmetrics.registerFontFamily("Malgun", normal="Malgun", bold="MalgunBd")
+# 코드 블록용 고정폭 폰트. Courier(내장 Type1)에는 한글과 그리스문자 글리프가
+# 없어서 검은 네모로 렌더링되므로, 한글을 지원하는 고정폭 폰트인 돋움체를 사용한다.
+pdfmetrics.registerFont(TTFont("Mono", r"C:\Windows\Fonts\gulim.ttc", subfontIndex=3))
 
 NAVY = colors.HexColor("#1B3A5C")
 ACCENT = colors.HexColor("#C25E00")
@@ -46,14 +52,15 @@ S["h3"] = ParagraphStyle("h3", fontName="MalgunBd", fontSize=10.8, leading=15, t
                          spaceBefore=9, spaceAfter=3, keepWithNext=1)
 S["body"] = ParagraphStyle("body", fontName="Malgun", fontSize=9.6, leading=15.4,
                            alignment=TA_JUSTIFY, spaceAfter=5)
-S["bullet"] = ParagraphStyle("bullet", parent=S["body"], leftIndent=11, bulletIndent=2, spaceAfter=3)
+S["bullet"] = ParagraphStyle("bullet", parent=S["body"], leftIndent=11, bulletIndent=2,
+                             bulletFontName="Malgun", spaceAfter=3)
 S["sub"] = ParagraphStyle("sub", parent=S["body"], leftIndent=22, bulletIndent=13,
-                          fontSize=9.1, leading=14, spaceAfter=2)
+                          bulletFontName="Malgun", fontSize=9.1, leading=14, spaceAfter=2)
 S["cell"] = ParagraphStyle("cell", fontName="Malgun", fontSize=8.5, leading=12.2)
 S["cellb"] = ParagraphStyle("cellb", fontName="MalgunBd", fontSize=8.5, leading=12.2)
 S["cellh"] = ParagraphStyle("cellh", fontName="MalgunBd", fontSize=8.6, leading=12.2,
                             textColor=colors.white)
-S["code"] = ParagraphStyle("code", fontName="Courier", fontSize=8.2, leading=12,
+S["code"] = ParagraphStyle("code", fontName="Mono", fontSize=8.2, leading=12.6,
                            backColor=LIGHT, borderPadding=(6, 7, 6, 7), spaceAfter=6)
 S["note"] = ParagraphStyle("note", parent=S["body"], fontSize=9.0, leading=14,
                            textColor=GREY, leftIndent=9, borderPadding=(5, 7, 5, 7),
@@ -61,14 +68,138 @@ S["note"] = ParagraphStyle("note", parent=S["body"], fontSize=9.0, leading=14,
 S["caption"] = ParagraphStyle("caption", fontName="Malgun", fontSize=8.3, leading=12,
                               textColor=GREY, spaceBefore=2, spaceAfter=9)
 
+
+# ── 각주(용어 설명) ──────────────────────────────────────────────
+# 전문 용어가 처음 나오는 자리에 위첨자 번호를 붙이고, 그 용어가 실제로 인쇄된
+# 페이지 하단에 쉬운 말 설명을 깔아준다. "어느 용어가 몇 페이지에 찍히는지"는
+# 렌더링을 해봐야 알 수 있으므로 문서를 두 번 빌드한다
+# (1차: 위치 수집 → 2차: 그 위치에 각주 인쇄). 두 번 다 페이지 여백이 같아야
+# 쪽나눔이 동일하게 나오므로, 각주 영역 높이는 아래 FOOT_H로 고정해둔다.
+GLOSSARY = [
+    ("MPC", "Model Predictive Control(모델 예측 제어). 앞으로 벌어질 일을 짧게 내다보고 지금 무엇을 할지 정한 뒤, 한 걸음 가서 다시 계산하기를 반복하는 제어 방식"),
+    ("SOC", "State of Charge. 배터리 잔량을 0~1(또는 %)로 나타낸 값. 1이면 만충, 0이면 방전"),
+    ("어드바이저리", "차량을 직접 조작하지 않고 '이 속도로 가세요'라고 사람에게 권하기만 하는 방식"),
+    ("컨트롤스탑", "대회가 지정한 의무 정차 지점. 정해진 시각 안에 도착해야 하고 일정 시간 머물러야 한다"),
+    ("Optuna", "여러 설정값 조합을 자동으로 시도해 가장 좋은 조합을 찾아주는 파이썬 최적화 라이브러리"),
+    ("dataclass", "값들을 묶어 두는 용도의 파이썬 클래스. 차량 제원처럼 '설정값 꾸러미'를 표현할 때 쓴다"),
+    ("Streamlit", "파이썬 코드만으로 웹 화면을 만들 수 있게 해주는 도구"),
+    ("Supabase", "회원가입·로그인과 데이터베이스를 대신 제공해 주는 클라우드 서비스"),
+    ("항력계수", "공기를 얼마나 잘 가르는지 나타내는 값(Cd). 작을수록 공기저항이 적다"),
+    ("구름저항", "타이어가 굴러갈 때 변형되며 생기는 저항"),
+    ("회생제동", "감속할 때 모터를 발전기처럼 써서 운동에너지 일부를 배터리로 되돌리는 기능"),
+    ("OCV", "Open Circuit Voltage(개방전압). 전류가 흐르지 않을 때의 배터리 전압으로, 잔량을 추정하는 기준이 된다"),
+    ("내부저항", "배터리 안에서 전류를 흐르지 못하게 막는 저항. 전류가 클수록 손실과 발열이 커진다"),
+    ("디레이팅", "조건이 나빠졌을 때 장비의 사용 한계를 낮춰 잡는 것. 여기서는 전압이 떨어지면 낼 수 있는 최고속도를 낮추는 것"),
+    ("이동평균", "들쭉날쭉한 값을 일정 구간씩 평균 내어 매끄럽게 만드는 방법"),
+    ("look-ahead", "앞으로 갈 구간의 정보를 미리 살펴보는 것"),
+    ("receding horizon", "'내다보는 창'을 한 걸음씩 앞으로 밀면서 매번 다시 계산하는 방식"),
+    ("목적함수", "'무엇을 잘한 것으로 볼지'를 숫자 하나로 정의한 식. 최적화는 이 값을 키우거나 줄인다"),
+    ("제약조건", "반드시 지켜야 하는 조건. 어기면 해가 될 수 없다"),
+    ("클리핑", "계산 결과가 허용 범위를 벗어나면 범위 끝값으로 잘라내는 것"),
+    ("램프", "값이 갑자기 계단식으로 바뀌지 않고 비례해서 부드럽게 변하도록 만든 구간"),
+    ("댐퍼", "값이 급격히 출렁이는 것을 눌러 부드럽게 만드는 장치"),
+    ("페널티", "규칙을 어긴 해에 점수를 깎아 최적화가 그쪽을 피하게 만드는 장치"),
+    ("TPE", "Optuna가 쓰는 탐색 방법. 지금까지의 시도 결과로 '좋은 값이 있을 법한 구간'을 추려 다음 후보를 고른다"),
+    ("common random numbers", "여러 후보를 비교할 때 완전히 같은 조건(같은 난수·같은 날씨)에서 평가해, 운의 차이를 없애는 기법"),
+    ("표준편차", "값이 평균에서 얼마나 흩어져 있는지 나타내는 수치. 클수록 불확실하다"),
+    ("정규분포", "평균 근처에 값이 많이 몰리고 멀어질수록 드물어지는 종 모양 분포"),
+    ("GIL", "파이썬이 한 번에 한 흐름만 실행하도록 거는 잠금장치. 이 때문에 스레드를 늘려도 계산이 빨라지지 않는다"),
+    ("subprocess", "프로그램이 별도의 독립된 프로그램을 하나 더 띄워 실행하는 것"),
+    ("블로킹", "그 작업이 끝날 때까지 다른 일을 못 하고 멈춰 있는 상태"),
+    ("FastAPI", "파이썬으로 웹 서버(API)를 만드는 도구"),
+    ("systemd", "리눅스에서 프로그램을 서비스로 등록해 재부팅 후에도 자동으로 켜지게 하는 장치"),
+    ("SQLite", "파일 하나로 동작하는 가벼운 데이터베이스"),
+    ("WAL 모드", "SQLite에서 쓰기와 읽기가 서로 막지 않게 해주는 저장 방식"),
+    ("체크포인트", "중간 결과를 저장해 두어, 중간에 멈춰도 거기서부터 살릴 수 있게 하는 것"),
+    ("RLS", "Row Level Security. 데이터베이스가 '이 사람은 자기 줄만 볼 수 있다'를 강제하는 보안 기능"),
+    ("토큰", "로그인했음을 증명하는 임시 문자열. 비밀번호 대신 주고받는다"),
+    ("싱글턴", "프로그램 전체에서 딱 하나만 존재하는 객체"),
+    ("프로파일", "프로그램의 어느 부분에서 시간이 얼마나 쓰이는지 실제로 측정하는 것"),
+    ("리팩터링", "동작은 그대로 두고 코드 구조만 정리하는 작업"),
+    ("A/B", "바꾸기 전(A)과 바꾼 후(B)를 같은 조건으로 돌려 결과를 비교하는 검증 방법"),
+    ("강화학습", "시행착오를 반복하며 보상을 많이 받는 행동을 스스로 익히는 기계학습 방식"),
+]
+FOOT_H = 20 * mm          # 각주 영역 높이 (1·2차 빌드가 같아야 하므로 고정)
+FOOT_FS = 7.3             # 각주 글자 크기
+FN_BY_NUM = {}            # 번호 -> (용어, 설명)
+_fn_seen = {}             # 용어 -> 번호 (첫 등장 때만 번호 부여)
+PAGE_FNS = {}             # 페이지 번호 -> [각주 번호]
+
+def annotate(text):
+    """본문에서 용어가 처음 나오는 자리에 위첨자 번호를 삽입한다.
+    <b>...</b> 같은 태그 안쪽은 건드리지 않도록 태그 단위로 잘라서 처리한다."""
+    fns = []
+    parts = re.split(r"(<[^>]+>)", text)
+    for i, seg in enumerate(parts):
+        if seg.startswith("<"):
+            continue
+        for term, desc in GLOSSARY:
+            if term in _fn_seen:
+                continue
+            idx = seg.find(term)
+            if idx < 0:
+                continue
+            n = len(FN_BY_NUM) + 1
+            _fn_seen[term] = n
+            FN_BY_NUM[n] = (term, desc)
+            cut = idx + len(term)
+            seg = seg[:cut] + '<super><font size=6 color="#C25E00">%d</font></super>' % n + seg[cut:]
+            fns.append(n)
+        parts[i] = seg
+    return "".join(parts), fns
+
+class FNParagraph(Paragraph):
+    """자기가 어느 페이지에 인쇄됐는지 기록하는 문단. 각주를 그 페이지 하단에 깔기 위함."""
+    def __init__(self, text, style, fns=(), bulletText=None):
+        Paragraph.__init__(self, text, style, bulletText=bulletText)
+        self._fns = list(fns)
+
+    def draw(self):
+        Paragraph.draw(self)
+        for n in getattr(self, "_fns", ()):
+            PAGE_FNS.setdefault(self.canv.getPageNumber(), [])
+            if n not in PAGE_FNS[self.canv.getPageNumber()]:
+                PAGE_FNS[self.canv.getPageNumber()].append(n)
+
+def _fp(text, style, bullet=None):
+    """각주 번호를 달아 문단을 만든다."""
+    t, fns = annotate(text)
+    return FNParagraph(t, style, fns=fns, bulletText=bullet)
+
+def draw_footnotes(canv, page):
+    nums = PAGE_FNS.get(page)
+    if not nums:
+        return
+    width = 170 * mm
+    fs = FOOT_FS
+    # 영역을 넘치면 글자를 조금 줄여서 맞춘다
+    for _ in range(6):
+        lines = []
+        for n in nums:
+            term, desc = FN_BY_NUM[n]
+            lines += simpleSplit("%d) %s: %s" % (n, term, desc), "Malgun", fs, width)
+        if len(lines) * (fs + 2.2) <= FOOT_H or fs <= 5.4:
+            break
+        fs -= 0.35
+    canv.saveState()
+    top = 22 * mm + FOOT_H
+    canv.setStrokeColor(LINE); canv.setLineWidth(0.4)
+    canv.line(20 * mm, top, 190 * mm, top)
+    canv.setFont("Malgun", fs); canv.setFillColor(GREY)
+    y = top - (fs + 2.6)
+    for ln in lines:
+        canv.drawString(20 * mm, y, ln)
+        y -= (fs + 2.2)
+    canv.restoreState()
+
 F = []
 def h1(t): F.append(Paragraph(t, S["h1"]))
 def h2(t): F.append(Paragraph(t, S["h2"]))
 def h3(t): F.append(Paragraph(t, S["h3"]))
-def p(t): F.append(Paragraph(t, S["body"]))
-def b(t): F.append(Paragraph(t, S["bullet"], bulletText="•"))
-def sb(t): F.append(Paragraph(t, S["sub"], bulletText="–"))
-def note(t): F.append(Paragraph(t, S["note"]))
+def p(t): F.append(_fp(t, S["body"]))
+def b(t): F.append(_fp(t, S["bullet"], bullet="•"))
+def sb(t): F.append(_fp(t, S["sub"], bullet="–"))
+def note(t): F.append(_fp(t, S["note"]))
 def code(t): F.append(Paragraph(t.replace(" ", "&nbsp;").replace("\n", "<br/>"), S["code"]))
 def cap(t): F.append(Paragraph(t, S["caption"]))
 def sp(h=5): F.append(Spacer(1, h))
@@ -104,6 +235,7 @@ cover = Table([
     [Paragraph("배포 앱 버전", S["cellb"]), Paragraph("v1.0.8 (Streamlit Cloud)", S["cell"])],
     [Paragraph("문서 기준일", S["cellb"]), Paragraph("2026-08-05", S["cell"])],
     [Paragraph("대상 경로", S["cellb"]), Paragraph("Darwin → Adelaide, 3,038.3 km", S["cell"])],
+    [Paragraph("원작자", S["cellb"]), Paragraph("노동호 (Dongho Roh)", S["cell"])],
     [Paragraph("문서 성격", S["cellb"]), Paragraph("설계·구현·운영 전반 총괄 기획안", S["cell"])],
 ], colWidths=[38 * mm, 92 * mm], hAlign="CENTER")
 cover.setStyle(TableStyle([
@@ -148,7 +280,6 @@ table(["장", "내용"], [
     ["9장", "검증 전략 및 이력"],
     ["10장", "개발 현황 및 로드맵"],
     ["11장", "리스크 및 알려진 이슈"],
-    ["12장", "개발 운영 규칙 — 문서 체계, Git 워크플로"],
 ], [16 * mm, 146 * mm])
 
 # ============================== 1. 개요 ==============================
@@ -263,8 +394,8 @@ table(["계층", "파일", "역할"], [
 
 h2("3.3 핵심 설계 원칙")
 h3("원칙 1 — 설정은 전역이 아니라 인자로 전달한다")
-p("모든 차량 제원과 시뮬레이션 파라미터는 모듈 전역 싱글턴이 아니라 <font face='Courier'>cfg</font> → "
-  "<font face='Courier'>const</font> dict로 함수에 전달된다. Streamlit Cloud는 여러 사용자가 "
+p("모든 차량 제원과 시뮬레이션 파라미터는 모듈 전역 싱글턴이 아니라 <font face='Mono'>cfg</font> → "
+  "<font face='Mono'>const</font> dict로 함수에 전달된다. Streamlit Cloud는 여러 사용자가 "
   "<b>서버 프로세스 하나를 공유</b>하므로, 전역 객체를 수정하면 한 사용자의 설정 변경이 그 순간 "
   "접속 중인 모든 사용자의 시뮬레이션 결과를 바꾼다.")
 note("이 버그는 실제로 두 번 발생했다. 1차는 차량 제원 전체(physics/solar/cell/pack/power/drive/race)가 "
@@ -274,13 +405,13 @@ note("이 버그는 실제로 두 번 발생했다. 1차는 차량 제원 전체
      "최신 시그니처를 반드시 확인해야 한다.</b>")
 
 h3("원칙 2 — 탐색 공간은 한 곳에서만 정의한다")
-p("Optuna 탐색 공간은 <font face='Courier'>scripts/main.py</font>의 "
-  "<font face='Courier'>build_objective()</font>에만 존재하고, 웹 런처는 이를 import해서 재사용한다. "
+p("Optuna 탐색 공간은 <font face='Mono'>scripts/main.py</font>의 "
+  "<font face='Mono'>build_objective()</font>에만 존재하고, 웹 런처는 이를 import해서 재사용한다. "
   "CLI로 돌리든 웹으로 돌리든 파라미터 범위가 갈라지지 않는다.")
 
 h3("원칙 3 — 원시 데이터 조회와 제어 판단을 분리한다")
 p("속도제한·신호등 같은 원시 데이터 조회는 Vehicle_Function.py에서 수행해 "
-  "<font face='Courier'>step</font> dict에 실어 보내고, mpc_controller.py는 그 값을 "
+  "<font face='Mono'>step</font> dict에 실어 보내고, mpc_controller.py는 그 값을 "
   "제어에 반영하기만 한다. 제어기가 데이터 소스를 직접 알지 않게 해 교체 가능성을 확보한다.")
 
 # ============================== 4. 물리 모델 ==============================
@@ -309,15 +440,15 @@ code("F_aero  = 0.5 · ρ · Cd · A_f · v_rel²      (v_rel: 대기 상대속�
      "P_drive = (F_aero + F_roll + F_slope + F_acc) · v / (η_drive · η_motor · η_inv)")
 b("풍향은 차량 헤딩과의 상대각을 계산해 정면풍 성분만 유효 속도에 반영한다.")
 b("가속도 <i>a</i>는 고정 상수가 아니라 직전 스텝 대비 실측값으로 계산한다. "
-  "<font face='Courier'>dt = 0</font>인 경로 중복점에서 0으로 나누는 문제가 있어 "
-  "<font face='Courier'>dt &gt; 0</font> 가드를 두었다.")
+  "<font face='Mono'>dt = 0</font>인 경로 중복점에서 0으로 나누는 문제가 있어 "
+  "<font face='Mono'>dt &gt; 0</font> 가드를 두었다.")
 b("경사각 θ는 원본 20m 해상도 slope를 그대로 쓰지 않는다. 고도 데이터 노이즈가 과대증폭되기 때문에 "
   "500m 이동평균으로 스무딩한 뒤 오르막/내리막을 판정한다.")
 
 h2("4.3 발전 모델")
 code("P_gen = 일사량[W/m²] · A_solar · η_solar")
 p("컨트롤스탑 정차 중에는 패널 각도를 태양에 맞출 수 있으므로 보정계수 "
-  "<font face='Courier'>cs_chg_eff = 0.8</font>을 적용한 별도 경로로 충전을 계산한다.")
+  "<font face='Mono'>cs_chg_eff = 0.8</font>을 적용한 별도 경로로 충전을 계산한다.")
 
 h2("4.4 배터리 모델")
 p("SOC-OCV 룩업 테이블(12점 선형보간)로 개방전압을 구하고, 내부저항에 의한 전압 강하와 "
@@ -326,7 +457,7 @@ code("V_ocv    = interp(SOC, ocv_soc, ocv_V) · HV_S\n"
      "R_eq     = R_cell · HV_S / HV_P\n"
      "I        = (V_ocv - sqrt(V_ocv² - 4·R_eq·P_batt)) / (2·R_eq)\n"
      "SOC(t+1) = SOC(t) - I·dt / HV_Capa")
-note("<font face='Courier'>sqrt</font> 안의 값이 음수가 되면(요구 전력이 배터리 최대 출력을 초과) "
+note("<font face='Mono'>sqrt</font> 안의 값이 음수가 되면(요구 전력이 배터리 최대 출력을 초과) "
      "NaN이 발생해 이후 계산 전체가 오염된다. 실제로 dt=0 버그가 이 경로를 통해 "
      "시뮬레이션 크래시로 이어진 사례가 있었다.")
 
@@ -407,7 +538,7 @@ code("for each of K=5 fixed weather scenarios:\n"
      "\n"
      "objective = mean(scores)")
 p("완주 여부가 1차 기준이고 그 안에서 평균속도를 겨루는 구조다. 미완주 해에 "
-  "<font face='Courier'>-2</font> 오프셋을 주어 어떤 완주 해보다도 항상 낮게 만들되, "
+  "<font face='Mono'>-2</font> 오프셋을 주어 어떤 완주 해보다도 항상 낮게 만들되, "
   "도달률을 더해 '얼마나 아깝게 실패했는지'의 기울기를 남겨 탐색이 방향을 잡을 수 있게 했다.")
 
 h2("6.2 탐색 공간 (12개 파라미터)")
@@ -425,7 +556,7 @@ table(["파라미터", "범위", "의미"], [
     ["margin_next_cs", "0.1 ~ 0.6", "다음 CS 페이스 블렌딩 여유"],
     ["soc_cutoff", "0.00 ~ 0.20", "하드 세이프티 SOC 하한"],
 ], [34 * mm, 34 * mm, 94 * mm])
-p("<font face='Courier'>momentum_gain</font>과 <font face='Courier'>alpha</font>는 현재 고정값이며, "
+p("<font face='Mono'>momentum_gain</font>과 <font face='Mono'>alpha</font>는 현재 고정값이며, "
   "본 탐색 재실행 시 탐색 공간 포함 여부를 결정한다. 파라미터 이름은 "
   "<b>세 지점(기본값 dict, mpc_speed 본문, suggest 호출부)이 모두 일치</b>해야 하며, "
   "하나라도 다르면 조용히 기본값으로 fallback되므로 주의가 필요하다.")
@@ -441,12 +572,12 @@ p("예보값에 표준편차를 곱해 흔들 때, 지점마다 독립적인 난
   "'이번엔 대체로 맑은/흐린 구간'처럼 일관되게 흔들리고, leg가 바뀌면 새로 뽑힌다.")
 
 h2("6.4 샘플러 선택")
-p("TPE(Tree-structured Parzen Estimator)에 <font face='Courier'>multivariate=True, group=True</font> "
+p("TPE(Tree-structured Parzen Estimator)에 <font face='Mono'>multivariate=True, group=True</font> "
   "옵션을 적용했다. 목적함수가 K개 평균으로 평활화되었더라도, 완주/미완주 경계에서 "
   "목적함수가 불연속적으로 튀는 특성 때문에 CMA-ES보다 TPE가 안정적이라고 판단했다.")
 
 h2("6.5 병렬화 전략")
-p("Optuna의 <font face='Courier'>n_jobs</font>는 GIL 때문에 CPU-bound 순수 Python 루프에서 "
+p("Optuna의 <font face='Mono'>n_jobs</font>는 GIL 때문에 CPU-bound 순수 Python 루프에서 "
   "실효성이 없다. 진짜 병렬을 얻으려면 <b>OS 프로세스를 분리</b>해 같은 storage에 붙여야 하며, "
   "이때 SQLite는 WAL 모드로 열어야 동시 접근이 가능하다. 웹 런처가 이 방식으로 구현되어 있다.")
 
@@ -475,7 +606,7 @@ table(["테이블", "용도", "주요 컬럼"], [
     ["optuna_runs", "Optuna 탐색 진행/결과", "study_name(고유), n_trials_completed/target, "
                                         "best_value, best_params, status"],
 ], [30 * mm, 42 * mm, 90 * mm])
-p("모든 테이블에 RLS(Row Level Security)를 적용해 <font face='Courier'>auth.uid() = user_id</font> "
+p("모든 테이블에 RLS(Row Level Security)를 적용해 <font face='Mono'>auth.uid() = user_id</font> "
   "조건으로 본인 행만 접근 가능하다. 클라이언트에 노출되는 anon key는 RLS를 전제로 공개해도 되는 "
   "값이며, service_role key는 절대 클라이언트에서 사용하지 않는다.")
 note("<b>보완 필요</b> — optuna_runs 테이블의 생성 SQL 원문이 저장소에 남아있지 않아, 현재는 "
@@ -492,13 +623,13 @@ code("로그인 (Supabase 토큰을 서버가 Supabase에 검증 요청)\n"
      "  → 20 trial마다 optuna_runs에 체크포인트 upsert\n"
      "  → 완료 시 best_params로 최종 시뮬레이션 1회 + 결과 파일 저장")
 h3("설계 판단")
-b("<b>왜 subprocess인가</b> — <font face='Courier'>study.optimize()</font>가 블로킹 호출이라 "
+b("<b>왜 subprocess인가</b> — <font face='Mono'>study.optimize()</font>가 블로킹 호출이라 "
   "FastAPI 프로세스 안에서 돌리면 다른 사용자의 요청까지 막힌다. 스레드로는 GIL 때문에 "
   "실제 병렬이 되지 않는다.")
 b("<b>왜 자체 사용자 DB를 안 만들었나</b> — 이미 있는 Supabase Auth를 재사용해 계정 체계를 "
   "하나로 유지했다. 서버는 받은 토큰을 Supabase에 물어봐 검증만 한다.")
 b("<b>디스크 로테이션</b> — 무료 인스턴스의 작은 디스크가 차면, 지금까지의 best_params를 "
-  "<font face='Courier'>enqueue_trial</font>로 이어받은 새 study로 교체해 탐색을 계속한다. "
+  "<font face='Mono'>enqueue_trial</font>로 이어받은 새 study로 교체해 탐색을 계속한다. "
   "결과는 이미 Supabase 체크포인트에 있어 안전하다.")
 b("<b>진행률 파일 분리</b> — study sqlite를 직접 세지 않고 별도 progress.json을 읽는다. "
   "로테이션이 일어나도 경로가 바뀌지 않아 진행률 표시가 끊기지 않는다.")
@@ -517,7 +648,7 @@ table(["데이터", "출처", "규모 / 형태"], [
 
 h2("8.2 전처리")
 b("<b>경사 스무딩</b> — 20m 해상도 원본 slope는 고도 노이즈가 과대증폭되므로 500m 이동평균 후 "
-  "<font face='Courier'>Crr·cos(θ) + sin(θ)</font> 부호로 오르막/내리막을 판정한다.")
+  "<font face='Mono'>Crr·cos(θ) + sin(θ)</font> 부호로 오르막/내리막을 판정한다.")
 b("<b>기상 격자 매핑</b> — 경로의 각 지점을 가장 가까운 기상 관측 지점에 사전 매핑해 "
   "런타임 조회를 O(1)로 만든다.")
 b("<b>메모리 절감</b> — 실제 사용하는 5개 컬럼만 남기고 dict로 변환한다. K=5개 날씨 사본을 "
@@ -525,7 +656,7 @@ b("<b>메모리 절감</b> — 실제 사용하는 5개 컬럼만 남기고 dict
 b("<b>numpy 변환</b> — 거리 배열을 pandas Index가 아닌 numpy 배열로 유지한다 (9.2절 참고).")
 
 h2("8.3 지형 세그먼트")
-p("연속된 내리막 구간의 경계를 <font face='Courier'>np.diff</font>/<font face='Courier'>np.where</font>로 "
+p("연속된 내리막 구간의 경계를 <font face='Mono'>np.diff</font>/<font face='Mono'>np.where</font>로 "
   "찾아 [시작거리, 끝거리, 대표경사각] 배열로 변환하는 1회성 전처리가 구현되어 있다. "
   "이 배열은 코스팅 진입 속도 상한 계산에 쓰일 예정이나, <b>이를 소비하는 "
   "compute_downhill_cap()이 아직 구현되지 않아 현재는 계산만 하고 사용되지 않는다.</b>")
@@ -548,9 +679,9 @@ p("200줄이 넘던 run_simulation()을 6개 헬퍼 함수로 분리(약 160줄�
 
 h3("사례 2 — 성능 병목 특정 (4.2배 개선)")
 p("탐색 시간이 갑자기 8분대로 늘어난 원인을 두 가지 가설(크래시 조기종료, 조기 실격)로 추정했으나 "
-  "모두 반증됐다. cProfile로 직접 측정한 결과 <font face='Courier'>dist_vals</font>가 numpy 배열이 "
+  "모두 반증됐다. cProfile로 직접 측정한 결과 <font face='Mono'>dist_vals</font>가 numpy 배열이 "
   "아닌 pandas Index여서 lookahead 샘플링 루프가 매번 pandas의 무거운 내부 경로를 타고 있었고, "
-  "이것이 전체 실행시간의 74%를 차지했다. <font face='Courier'>.to_numpy()</font> 한 줄로 "
+  "이것이 전체 실행시간의 74%를 차지했다. <font face='Mono'>.to_numpy()</font> 한 줄로 "
   "214초 → 51초로 개선했고 결과는 동일함을 확인했다.")
 note("<b>교훈</b> — 성능 문제는 가설을 세우는 것보다 프로파일러를 먼저 돌리는 것이 빠르다.")
 
@@ -651,51 +782,9 @@ b("<b>momentum 결합 효과 미검증</b> — LV2의 momentum 항이 실제 SOC
 h2("11.3 운영 리스크")
 b("<b>다중 세션 병행 작업</b> — 여러 컴퓨터와 여러 AI 에이전트(Claude Code / Codex)가 동시에 "
   "작업하면서 백로그 파일이 두 개로 갈라지거나, 코드만 올라오고 문서가 누락되는 일이 있었다. "
-  "→ 12장의 문서 규칙으로 대응")
+  "→ 저장소의 문서 규칙(README·백로그·작업기록)으로 대응")
 b("<b>커밋 누락</b> — 구현·테스트를 마치고 push를 잊어 배포에 반영되지 않은 사례가 있었다. "
   "→ '완료 보고 전 커밋·푸시 완료' 규칙 명문화")
-
-# ============================== 12. 운영 규칙 ==============================
-h1("12. 개발 운영 규칙")
-
-h2("12.1 기준 문서 체계")
-p("여러 컴퓨터와 여러 AI 세션을 오가며 작업하므로 <b>대화 기억은 기준이 될 수 없다.</b> "
-  "GitHub 저장소의 문서와 커밋된 코드만이 기준이다.")
-table(["문서", "역할"], [
-    ["README.md", "전체 요약 — 구조·구동원리·현재 상태·다음 할 일. 항상 여기서 시작"],
-    ["progress/NN_주제.txt", "완료된 작업별 상세 기록 (배경/구현/버그/검증/상태)"],
-    ["progress/ 최대 번호", "최신 백로그 — 지금 당장 다음에 할 일. 항상 하나만 존재"],
-    ["debug_logs/(날짜)_주제.txt", "버그 추적 과정 (문제→원인→해결→상태)"],
-    ["SETUP.md", "환경 재현 절차"],
-    ["server/README.md", "탐색 서버 배포 가이드"],
-    ["CLAUDE.md / AGENTS.md", "AI 에이전트 작업 규칙 (두 파일은 동일 원칙 유지)"],
-], [42 * mm, 120 * mm])
-
-h2("12.2 Git 워크플로")
-b("컴퓨터 간 인계는 GitHub 저장소로만 한다 (ZIP 압축 방식 폐기).")
-b("작업 시작 전 브랜치·작업 트리 상태와 원격 최신 상태를 확인한다.")
-b("커밋되지 않은 사용자 변경사항을 임의로 덮어쓰거나 삭제하지 않는다.")
-b("<b>기능 구현이 끝나면 커밋·푸시까지 마친 뒤에 완료 보고한다.</b> 사용자 액션을 기다리는 "
-  "중간 단계가 있으면 다른 이슈가 끼어들어 push를 잊기 쉬우므로 특히 주의한다.")
-b("다른 세션의 미커밋 변경이 남아 있으면, 변경 내용을 직접 조사해 무엇이 바뀌었는지 설명하는 "
-  "메시지로 커밋해 항상 최신 상태를 유지한다.")
-b("배포는 push 시 Streamlit Cloud가 자동 반영한다. 오라클 서버는 git pull + systemctl restart가 필요하다.")
-
-h2("12.3 코드 작성 주체 구분")
-table(["영역", "작성 주체", "비고"], [
-    ["Functions/Vehicle_Function.py", "사용자", "의사결정·물리 로직. AI는 공식/시그니처/후크 지점 "
-                                             "스펙만 텍스트로 제공"],
-    ["mpc/mpc_controller.py", "사용자", "동일. 명시적 요청 시에만 예외적으로 AI가 작성"],
-    ["scripts/main.py, app.py, server/", "AI", "인프라·배관 작업 (파라미터 연결, 데이터 로딩, "
-                                              "UI, 서버/배포 설정)"],
-    ["CSV 데이터, 분석/플로팅 스크립트", "AI", ""],
-], [50 * mm, 22 * mm, 90 * mm])
-p("이 구분의 목적은 <b>핵심 물리·제어 로직에 대한 이해를 사용자가 직접 유지</b>하는 것이다. "
-  "연구 과제이자 포트폴리오인 프로젝트 성격상, 의사결정 로직을 남이 대신 작성하면 의미가 없다.")
-
-h2("12.4 릴리즈 관리")
-p("사용자가 체감할 기능을 배포할 때마다 app.py의 RELEASE_NOTES 리스트 맨 앞에 항목을 추가하고 "
-  "버전을 올린다(현재 v1.0.8). 앱 안에서 버전과 업데이트 이력을 바로 확인할 수 있다.")
 
 sp(10)
 F.append(Paragraph("― 문서 끝 ―", ParagraphStyle("end", parent=S["body"], alignment=TA_CENTER,
@@ -713,14 +802,28 @@ def deco(canv, doc):
         canv.line(20 * mm, 16 * mm, 190 * mm, 16 * mm)
         canv.setFont("Malgun", 8.4); canv.setFillColor(NAVY)
         canv.drawCentredString(105 * mm, 10.5 * mm, str(doc.page))
+        draw_footnotes(canv, doc.page)
     canv.restoreState()
 
 doc = BaseDocTemplate(OUT, pagesize=A4,
                       leftMargin=20 * mm, rightMargin=20 * mm,
-                      topMargin=24 * mm, bottomMargin=22 * mm,
+                      topMargin=24 * mm, bottomMargin=22 * mm + FOOT_H,
                       title="WSC 주행효율 예측 MPC 시뮬레이터 총괄 기획안",
-                      author="WSC_DriveEff_Project")
+                      author="노동호 (Dongho Roh)")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="n")
 doc.addPageTemplates([PageTemplate(id="all", frames=[frame], onPage=deco)])
+
+# 1차 빌드: 각 각주가 몇 페이지에 찍히는지 수집(각주는 아직 인쇄 안 함)
+import copy
+_collect = copy.deepcopy(F)
+_pass1 = BaseDocTemplate(os.devnull, pagesize=A4,
+                         leftMargin=doc.leftMargin, rightMargin=doc.rightMargin,
+                         topMargin=doc.topMargin, bottomMargin=doc.bottomMargin)
+_pass1.addPageTemplates([PageTemplate(id="all",
+                         frames=[Frame(_pass1.leftMargin, _pass1.bottomMargin,
+                                       _pass1.width, _pass1.height, id="n")])])
+_pass1.build(_collect)
+
+# 2차 빌드: 위에서 모은 위치에 각주를 실제로 인쇄
 doc.build(F)
 print("생성 완료:", OUT, os.path.getsize(OUT), "bytes")
