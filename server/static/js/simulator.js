@@ -9,6 +9,8 @@ let vehicleConfigProvider = () => ({});
 let lastResult = null;
 let lastCfg = null;
 let lastParams = {};
+const SIM_RUN_ID_KEY = "wscLastSimRunId";
+const TERMINAL_STATUSES = new Set(["done", "error", "lost", "interrupted"]);
 
 function setBar(id, pct) {
   document.getElementById(id).style.width = `${pct}%`;
@@ -108,21 +110,35 @@ async function pollSimulation() {
       setText("simStatus", "Interrupted");
       setText("simText", data.detail || "Simulation was interrupted by a server restart.");
     }
+    return data.status;
   } catch (e) {
     document.getElementById("simErr").textContent = e.message;
+    return null;
   }
+}
+
+async function attachSimulationRun(runId) {
+  simRunId = runId;
+  document.getElementById("simResultCard").hidden = false;
+  const status = await pollSimulation();
+  if (!status) return false;
+  if (!TERMINAL_STATUSES.has(status)) {
+    if (simTimer) clearInterval(simTimer);
+    simTimer = setInterval(pollSimulation, 1500);
+  }
+  return true;
 }
 
 async function resumeSimulation() {
   try {
+    const storedRunId = localStorage.getItem(SIM_RUN_ID_KEY);
+    if (storedRunId && await attachSimulationRun(storedRunId)) return;
+
     const res = await fetch("/api/sim/my-active-run", { headers: await apiHeaders() });
     const data = await res.json();
     if (!res.ok || !data.run_id) return;
-    simRunId = data.run_id;
-    document.getElementById("simResultCard").hidden = false;
-    await pollSimulation();
-    if (simTimer) clearInterval(simTimer);
-    simTimer = setInterval(pollSimulation, 1500);
+    localStorage.setItem(SIM_RUN_ID_KEY, data.run_id);
+    await attachSimulationRun(data.run_id);
   } catch (e) {
     // The next explicit run can recover from transient auth/network failures.
   }
@@ -150,6 +166,7 @@ async function startSimulation() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Simulation request failed.");
     simRunId = data.run_id;
+    localStorage.setItem(SIM_RUN_ID_KEY, simRunId);
     pollSimulation();
     if (simTimer) clearInterval(simTimer);
     simTimer = setInterval(pollSimulation, 1500);
