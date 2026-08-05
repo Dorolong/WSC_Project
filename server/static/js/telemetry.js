@@ -54,13 +54,60 @@ function renderLogList(logs) {
     return;
   }
   logs.forEach((log) => {
+    const line = document.createElement("div");
+    line.className = "log-line";
+
     const row = document.createElement("button");
     row.type = "button";
     row.className = "log-row";
-    row.textContent = `${log.file_name || log.id} · ${log.status || "-"} · ${log.frame_count || 0} frames`;
+    row.textContent = `${log.file_name || log.id} · ${statusLabel(log.status)} · ${log.frame_count || 0} frames`;
     row.addEventListener("click", () => openLog(log.id));
-    box.appendChild(row);
+    line.appendChild(row);
+
+    // 실패한 업로드가 계속 쌓이는데 지울 방법이 없었다.
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "log-delete";
+    del.textContent = "Delete";
+    del.title = "이 업로드 기록을 삭제합니다";
+    del.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      deleteLog(log.id, log.file_name);
+    });
+    line.appendChild(del);
+
+    box.appendChild(line);
   });
+}
+
+function statusLabel(status) {
+  const map = {
+    queued: "Queued",
+    running: "Running",
+    done: "Done",
+    error: "Error",
+    lost: "Lost",
+    interrupted: "Interrupted",
+  };
+  return map[status] || status || "-";
+}
+
+async function deleteLog(logId, fileName) {
+  if (!window.confirm(`${fileName || logId} 기록을 삭제할까요? 저장된 프레임도 함께 지워집니다.`)) return;
+  setError();
+  try {
+    const headers = await apiHeaders();
+    const res = await fetch(`/api/telemetry/logs/${logId}`, { method: "DELETE", headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || "Telemetry delete failed.");
+    if (currentLogId === logId) {
+      currentLogId = null;
+      el("telemetryChartCard").hidden = true;
+    }
+    await loadLogs();
+  } catch (e) {
+    setError(e.message);
+  }
 }
 
 async function uploadLog() {

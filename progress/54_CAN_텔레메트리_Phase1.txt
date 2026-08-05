@@ -106,4 +106,44 @@ Supabase에서 `docs/supabase_telemetry_phase1.sql` 실행 후 Oracle 서버에�
 [되돌리기]
 커밋 단위 revert가 가장 안전하다. Supabase SQL까지 적용했다면 배포 rollback 후
 `telemetry_frames`, `telemetry_logs` 테이블은 필요 시 별도 drop한다.
+
+[실배포 후 발견한 버그 - 2026-08-05 수정]
+사용자가 배포 후 canlog.csv 를 업로드했더니 3건 모두 **정확히 500 프레임**
+에서 실패했다(배치 크기와 같은 수). 원인:
+
+**NaN 이 표준 JSON 에 없는 리터럴이라 배치 전체가 거부됐다.**
+CAN 8바이트를 float32 로 해석하면 NaN/Inf 가 나오는 프레임이 있다. 그
+프레임이 애초에 float 쌍이 아니라 정수·비트필드이기 때문이다(0x6FA 등).
+파이썬 json.dumps 는 이걸 `NaN` 리터럴로 직렬화하는데 RFC 8259 에는 그런
+리터럴이 없어서 PostgREST 가 400 으로 거부한다. 한 건 때문에 500건이
+통째로 날아간다. 실측: canlog.csv 첫 500 프레임에 NaN 23개.
+
+"500 frames" 로 보인 건 500개를 저장했다는 뜻이 아니라 500번째에서
+죽었다는 뜻이다 - 진행률이 삽입 성공 후에 기록되는데, 첫 삽입이 실패해
+except 로 빠지면서 그 시점의 frame_count(=500)를 기록했기 때문이다.
+
+수정:
+- server/telemetry_runner.py 에 _json_safe_float() 추가. 전송 직전
+  NaN/Inf 를 None 으로 바꾼다. 값 손실이 아니다 - raw_data_hex 에 원본
+  바이트가 남아 있어 신호 정의에 따라 정수로 재해석하면 살아난다
+  (지시서가 raw 보존을 요구한 이유가 이것).
+- _insert_frames() 가 raise_for_status() 대신 **응답 본문을 포함해** 실패를
+  던지도록 변경. 기존에는 Supabase 가 알려준 사유가 로그에 안 남았다.
+- server/main.py: 목록 API 가 내부 상태값 "finished_process" 를 그대로
+  노출하던 문제 수정(_resolve_telemetry_status 로 done/error 확정).
+- server/main.py: DELETE /api/telemetry/logs/{run_id} 신설.
+  실패한 업로드가 쌓이는데 지울 방법이 없었다. telemetry_frames 는
+  on delete cascade 로 묶여 있어 로그 행만 지우면 프레임도 지워진다.
+  처리 중인 업로드는 409 로 거부한다.
+- 프론트: 기록마다 Delete 버튼, 상태 라벨 매핑 추가.
+
+검증(로컬):
+- 첫 배치 500건을 실제와 같은 방식으로 만들어 직렬화 비교.
+  수정 전 = 본문에 NaN 리터럴 포함, 엄격 파서 실패.
+  수정 후 = NaN 없음, 엄격 파서 통과, 23개 행이 null 로 기록.
+- NaN 이던 행의 raw_data_hex 가 그대로 보존되는 것 확인
+  (can_id=0x6FA, raw=8B4A0200C396FFFF).
+- py_compile 통과, DELETE 라우트 등록 확인, app.css 미정의 변수 0개.
+- 실제 Supabase 삽입은 배포 후 재업로드로 확인 필요.
+
 ================================================================

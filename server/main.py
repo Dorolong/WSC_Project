@@ -980,6 +980,18 @@ def _read_sim_progress(run_id: str):
         return {"pct": 0.0, "started_at": None}
 
 
+def _resolve_telemetry_status(run_id: str, status):
+    """사용자에게 보여줄 상태로 변환한다.
+
+    "finished_process" 는 "OS 프로세스는 끝났고 결과 파일 판정은 아직" 이라는
+    내부 상태값이라 화면에 그대로 노출되면 안 된다(실제로 노출된 적 있음).
+    결과 파일을 읽어 done/error 로 확정하고, 파일이 없으면 lost 로 본다.
+    """
+    if status != "finished_process":
+        return status
+    return _load_result_status(_telemetry_result_path(run_id)) or "lost"
+
+
 def _read_telemetry_progress(run_id: str):
     try:
         with open(_telemetry_progress_path(run_id), encoding="utf-8") as f:
@@ -1262,7 +1274,7 @@ def list_telemetry_logs(authorization: str | None = Header(default=None)):
             {
                 "id": run_id,
                 "file_name": run.get("file_name"),
-                "status": run.get("status"),
+                "status": _resolve_telemetry_status(run_id, run.get("status")),
                 "frame_count": _read_telemetry_progress(run_id).get("frame_count", run.get("frame_count", 0)),
                 "created_at": run.get("queued_at"),
             }
@@ -1332,6 +1344,48 @@ def get_telemetry_log(run_id: str, authorization: str | None = Header(default=No
     if not rows:
         raise HTTPException(status_code=404, detail="Telemetry log not found.")
     return {"run_id": run_id, "status": rows[0].get("status"), "result": rows[0]}
+
+
+@app.delete("/api/telemetry/logs/{run_id}")
+def delete_telemetry_log(run_id: str, authorization: str | None = Header(default=None)):
+    """업로드 기록을 지운다.
+
+    실패한 업로드가 목록에 계속 쌓이는데 지울 방법이 없었다.
+    telemetry_frames 는 telemetry_logs 에 on delete cascade 로 묶여 있어서
+    로그 행만 지우면 프레임도 같이 지워진다(docs/supabase_telemetry_phase1.sql).
+    진행 중인 작업은 지우지 않는다 - 워커가 계속 쓰고 있기 때문.
+    """
+    user = verify_user(authorization)
+    with _lock:
+        run = TELEMETRY_RUNS.get(run_id)
+        if run and run.get("user_id") != user.get("id"):
+            raise HTTPException(status_code=403, detail="You can only delete your own telemetry log.")
+        if run and _resolve_telemetry_status(run_id, run.get("status")) not in TERMINAL_STATUSES:
+            raise HTTPException(status_code=409, detail="아직 처리 중인 업로드는 삭제할 수 없어요.")
+        TELEMETRY_RUNS.pop(run_id, None)
+        if run_id in TELEMETRY_QUEUE:
+            TELEMETRY_QUEUE.remove(run_id)
+        _save_runs_state_unlocked()
+
+    access_token = authorization.removeprefix("Bearer ").strip()
+    resp = requests.delete(
+        f"{SUPABASE_URL}/rest/v1/telemetry_logs",
+        headers=_supabase_headers(access_token, "return=minimal"),
+        params={"id": f"eq.{run_id}", "user_id": f"eq.{user.get('id')}"},
+        timeout=20,
+    )
+    if resp.status_code in (401, 403):
+        raise HTTPException(status_code=resp.status_code, detail="Supabase telemetry access denied.")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Supabase telemetry delete failed.")
+
+    for path in (_telemetry_result_path(run_id), _telemetry_progress_path(run_id)):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    logger.info("telemetry log deleted run_id=%s", run_id)
+    return {"run_id": run_id, "deleted": True}
 
 
 @app.get("/api/telemetry/logs/{run_id}/series")
