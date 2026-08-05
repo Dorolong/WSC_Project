@@ -14,6 +14,8 @@
 - API 레이트 리밋: progress/50. 코드 반영/푸시 완료, 서버 실배포 확인 필요.
 - Optuna 탐색 Stop 버튼: progress/52. 구현 완료. 현재 PC에는 Python 이 없어
   실기동 검증은 못 했으므로 서버/다른 PC에서 반드시 V-a~V-h 확인.
+  e97cbc7 은 GitHub push 완료. 남은 것은 오라클 서버 git pull + restart.
+  별도 메모는 docs/oracle_deploy_pending_stop_button.txt.
 
 [ 지금 이어서 할 일 1순위 ]
 1. Optuna Stop 버튼 서버 배포/실기동 검증
