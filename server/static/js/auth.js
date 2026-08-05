@@ -120,6 +120,47 @@ async function login() {
   }
 }
 
+function openSignup() {
+  document.getElementById("signupErr").textContent = "";
+  document.getElementById("signupDialog").showModal();
+}
+
+function closeSignup() {
+  document.getElementById("signupDialog").close();
+}
+
+async function signup() {
+  const nickname = document.getElementById("signupName").value.trim();
+  const email = document.getElementById("signupEmail").value.trim();
+  const password = document.getElementById("signupPassword").value;
+  const errEl = document.getElementById("signupErr");
+  errEl.textContent = "";
+
+  if (!nickname) {
+    errEl.textContent = "Enter your name.";
+    return;
+  }
+  if (!email || !password) {
+    errEl.textContent = "Enter email and password.";
+    return;
+  }
+
+  try {
+    const client = await getClient();
+    const { error } = await client.auth.signUp({
+      email,
+      password,
+      options: { data: { nickname } },
+    });
+    if (error) throw error;
+    errEl.textContent = "Account created. Check your email, then sign in.";
+    document.getElementById("email").value = email;
+    document.getElementById("password").value = "";
+  } catch (e) {
+    errEl.textContent = e.message || "Sign up failed.";
+  }
+}
+
 async function logout() {
   const client = await getClient();
   await client.auth.signOut();
@@ -134,6 +175,9 @@ async function logout() {
 
 export function initAuth() {
   document.getElementById("loginBtn").addEventListener("click", login);
+  document.getElementById("openSignupBtn").addEventListener("click", openSignup);
+  document.getElementById("signupClose").addEventListener("click", closeSignup);
+  document.getElementById("signupSubmit").addEventListener("click", signup);
   document.getElementById("logoutBtn").addEventListener("click", logout);
   tryAutoLogin();
 }

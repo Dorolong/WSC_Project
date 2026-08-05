@@ -94,6 +94,7 @@ label {
 
 input[type="email"],
 input[type="password"],
+input[type="text"],
 input[type="number"] {
   width: 100%;
   min-height: var(--size-control-min);

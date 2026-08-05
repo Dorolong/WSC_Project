@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>WSC Optuna Queue</title>
+<title>WSC Drive Efficiency Predict Simulation</title>
 <!-- 파비콘이 없으면 브라우저가 매 로드마다 /favicon.ico 를 찾다가 404를 내고
      콘솔이 지저분해진다. 별도 파일 없이 data: URI 로 끝낸다.
      CSP 의 img-src 에 data: 가 허용돼 있어야 뜬다(Caddyfile 참고). -->
@@ -15,8 +15,8 @@
 <div class="app-shell">
   <header class="topbar">
     <div>
-      <h1>WSC Optuna Queue</h1>
-      <p class="sub">Run personal Optuna searches on the shared WSC server.</p>
+      <h1>WSC Drive Efficiency Predict Simulation</h1>
+      <p class="sub">Run personal Model Predict on the shared Common server.</p>
     </div>
     <nav class="top-links" aria-label="External links">
       <a href="https://wscproject-dmiusnw9kapxecz8irxpgw.streamlit.app/" target="_blank" rel="noopener">Streamlit App</a>
@@ -39,6 +39,7 @@
           <span>Remember email</span>
         </label>
         <button class="btn" id="loginBtn">Sign in</button>
+        <button class="btn secondary" id="openSignupBtn" type="button">Create account</button>
         <p class="err" id="gateErr"></p>
       </div>
     </section>
@@ -151,6 +152,25 @@
       <button class="btn secondary" id="vehicleConfigLoad" type="button">Load Saved</button>
       <button class="btn secondary" id="vehicleConfigSave" type="button">Save to Account</button>
       <button class="btn" id="vehicleConfigApply" type="button">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal" id="signupDialog">
+  <form method="dialog" class="modal-panel">
+    <div class="status-row modal-head">
+      <strong>Create account</strong>
+      <button class="link-button" id="signupClose" type="button">Close</button>
+    </div>
+    <div class="form-grid">
+      <label for="signupName">Name</label>
+      <input type="text" id="signupName" autocomplete="name" />
+      <label for="signupEmail">Email</label>
+      <input type="email" id="signupEmail" autocomplete="email" />
+      <label for="signupPassword">Password</label>
+      <input type="password" id="signupPassword" autocomplete="new-password" />
+      <button class="btn" id="signupSubmit" type="button">Create account</button>
+      <p class="err" id="signupErr"></p>
     </div>
   </form>
 </dialog>
