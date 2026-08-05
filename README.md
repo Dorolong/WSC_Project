@@ -1,528 +1,418 @@
-# WSC_DriveEff_Project
+# WSC 주행효율 MPC
 
-태양광 자동차(World Solar Challenge 출전 + 연구과제 + 포트폴리오) **주행효율 예측 MPC 시뮬레이터**.
-
-Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 예산을 바탕으로
-**구간별 권장 최적 속도**를 계산하고, 27일 제한시간·컨트롤스탑 마감시각·법정
-속도제한 같은 실제 대회 규칙 아래에서 완주 가능성을 시뮬레이션합니다.
-(액추에이터를 직접 제어하지 않는 **어드바이저리 출력**)
-
-> **이 저장소의 `.md` 파일이 프로젝트의 기준 문서입니다.**
-> 작업 기준·현재 상태·다음 할 일은 항상 이 README와 `progress/`의 최신
-> 백로그를 먼저 확인하세요. 대화 기록이 아니라 저장소에 남은 문서가 기준입니다.
+> 모델 개발만 남긴 구성. 웹·서버·배포 코드는 **의도적으로 뺐다**
+> (개발 도구일 뿐 인계 대상이 아님).
 >
-> | 문서 | 역할 |
-> |---|---|
-> | `README.md` | 전체 요약 — 구조·원리·현재 상태·다음 할 일 (**여기서 시작**) |
-> | `progress/55_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
-> | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
-> | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
-> | `docs/구조도.html` | **시스템 구조 한 장 요약** — 단면도·요청 경로·이해도 지형 (브라우저로 열기) |
-> | `docs/진행_흐름도.html` | **여기까지 온 길** — 4개 축, 고민하고 기각한 선택지, 실전 구성 |
-> | `docs/이해_지도.md` | **이 프로젝트를 이해하는 학습 경로** — 무엇부터, 어디까지 알아야 하는가 |
-> | `docs/WSC_DriveEff_총괄기획안.pdf` | 설계 근거 총정리 (15p, 일반 독자용 각주 포함) |
-> | `SETUP.md` | 다른 컴퓨터에서 환경 재현하는 방법 |
-> | `server/README.md` | Optuna 웹 런처 서버 배포 가이드 |
-> | `CLAUDE.md` / `AGENTS.md` | AI 에이전트 작업 규칙 |
+> **이전 전체 이력과 웹·서버 코드는 `backup_trial260806` 브랜치에 있다.**
+> Streamlit 앱, Optuna 웹 런처, Supabase 연동, 배포 설정, `progress/` 60여 개
+> 작업 기록, `debug_logs/`, 총괄기획안 PDF, 구조도·흐름도가 전부 거기 있다.
+> `git show backup_trial260806:경로/파일` 로 꺼내 볼 수 있다.
 
 ---
 
-## 1. 시스템 구조
+## 0. 한 문단 요약
 
-두 가지를 나란히 둡니다 — **기존 Streamlit 구조**와 **새 HTML/FastAPI 구조**입니다.
+Darwin→Adelaide **3,038km**를 태양광 에너지만으로, **27일 제한시간·9개
+컨트롤스탑 마감시각·구간평균 60km/h·법정속도제한** 아래 완주하는
+**구간별 권장 속도**를 계산한다. 빠르면 공기저항(v²)·소비전력(v³)으로
+배터리가 죽고, 느리면 시간 제약에 걸려 실격된다. **에너지와 시간의
+최적 균형점을 전 구간에 걸쳐 찾는 문제**다.
 
-> ⚠️ **전환 계획 진행 중**
-> Streamlit Cloud를 접고 오라클 서버 하나로 통합하는 작업이 진행 중입니다
-> (**Phase 0~6 구현 완료, 서버 실배포 최종 확인 전**). 상세:
-> [`progress/43`](progress/43_웹통합_HTML전환_계획.txt) ·
-> 실행 지시서: [`docs/codex_web_migration_tasks.txt`](docs/codex_web_migration_tasks.txt)
->
-> `app.py` 삭제와 Streamlit Cloud 중단은 사용자 최종 확인 후 진행합니다.
+**최종 인계물은 프로그램이 아니라 표 파일이다.** 개발자는 호주에 가지
+않는다. 현장(팀원 노트북)은 이미 CAN 수신·대시보드를 갖고 있고, 우리는
+"어떤 상태에서 얼마로 달릴지"를 담은 표만 보낸다.
 
-### 1-1. 기존 Streamlit 구조 〔legacy 보관〕
+---
 
-지금 실제로 돌아가는 구조입니다. **앱 2개 + 공용 계산 엔진**으로 구성되고,
-두 앱은 같은 Supabase 프로젝트를 공유해서 계정과 결과가 이어집니다.
+## 1. 계층 구조 — 아래가 위를 떠받친다
 
-```mermaid
-flowchart TB
-    subgraph SC["Streamlit Cloud"]
-        APP["app.py<br/>단일 시뮬레이션 1회 실행<br/>결과 시각화 · 차량 제원 설정"]
-    end
-    subgraph OC["오라클 클라우드"]
-        SRV["server/main.py (FastAPI)<br/>Optuna 탐색 N trial 실행<br/>대기열 · 진행률"]
-    end
-    subgraph ENG["공용 계산 엔진 (양쪽이 동일하게 import)"]
-        CFG["Configs/Vehicle_Params.py<br/>차량 제원 dataclass + build_default_cfg()"]
-        FN["Functions/Vehicle_Function.py<br/>주행저항·SOC·발전량 · run_simulation()"]
-        MPC["mpc/mpc_controller.py<br/>mpc_speed() — LV1~LV8 규칙 기반"]
-        OPT["scripts/main.py<br/>build_objective() — 탐색 공간 정의"]
-    end
-    DB[("Supabase<br/>Auth · simulation_runs<br/>user_settings · optuna_runs")]
-
-    APP --> ENG
-    SRV --> ENG
-    APP <--> DB
-    SRV <--> DB
-    OPT --> FN --> MPC
-    CFG --> FN
-```
-
-| 계층 | 파일 | 역할 |
+| 층 | 내용 | 상태 |
 |---|---|---|
-| 설정 | [`Configs/Vehicle_Params.py`](Configs/Vehicle_Params.py) | 차량 제원 dataclass 8종 + `build_default_cfg()` |
-| 물리 엔진 | [`Functions/Vehicle_Function.py`](Functions/Vehicle_Function.py) | 주행저항·SOC·발전량 계산, `run_simulation()` 메인 루프 |
-| 제어기 | [`mpc/mpc_controller.py`](mpc/mpc_controller.py) | `mpc_speed()` — LV1~LV8 규칙 기반 속도 결정 |
-| 탐색 | [`scripts/main.py`](scripts/main.py) | `build_objective()` — **탐색 공간 정의는 여기 한 곳뿐** |
-| 웹 앱 | [`app.py`](app.py) | Streamlit UI, 로그인, 결과 저장/조회 |
-| 탐색 서버 | [`server/`](server/) | FastAPI 런처 + 별도 프로세스 탐색 실행 |
+| **L0 인계물** | 권장속도 표 (호주로 나가는 유일한 것) | 미착수 |
+| **L1 결정** | DP 최적화 | 미착수 |
+| **L2 예측** | 주행저항·SOC·발전 + **열** + 잔차 | 열 미구현 |
+| **L3 데이터** | 시험주행 텔레메트리 (모델 보정용) | 디코더 완료 |
+| L4 인프라 | 시뮬레이터·Optuna·웹 | 원본 저장소에 있음 |
 
-### 1-2. 새 HTML/FastAPI 구조
+---
 
-오라클 서버 하나가 프론트와 API를 모두 서빙합니다. 프론트와 API가
-**같은 도메인**이라 CORS가 필요 없습니다. 기존 Streamlit 앱은 최종 중단/삭제
-확정 전까지 legacy로 보관합니다.
+## 2. 지금 있는 것
 
-```mermaid
-flowchart TB
-    subgraph OC["오라클 클라우드 — 단일 서버 · 단일 도메인"]
-        FE["server/static/ (HTML + CSS + JS)<br/>로그인 게이트 → 내부 셸<br/>시뮬레이터 · Optuna · 텔레메트리 · 기록 · 설정"]
-        API["server/main.py (FastAPI)<br/>시뮬레이션 API + Optuna 런처 + CAN 로그 업로드<br/>대기열 · 진행률 · 로깅"]
-        SIM["server/sim_runner.py<br/>시뮬레이션 1회 (서브프로세스)"]
-        STU["server/study_runner.py<br/>Optuna N trial (서브프로세스)"]
-        TEL["server/telemetry_runner.py<br/>CAN 로그 파싱 (서브프로세스)"]
-    end
-    subgraph ENG["공용 계산 엔진 — 변경 없음"]
-        SER["shared/cfg_serde.py<br/>cfg 직렬화 / 역직렬화"]
-        CFG["Configs/Vehicle_Params.py<br/>build_default_cfg()"]
-        FN["Functions/Vehicle_Function.py<br/>run_simulation()"]
-        MPC["mpc/mpc_controller.py<br/>mpc_speed()"]
-        OPT["scripts/main.py<br/>build_objective()"]
-    end
-    DB[("Supabase<br/>Auth · simulation_runs<br/>user_settings · optuna_runs<br/>telemetry_logs · telemetry_frames")]
+### 2.1 물리 엔진 — `Functions/Vehicle_Function.py` (709줄)
 
-    FE -->|"fetch (same-origin, CORS 불필요)"| API
-    API --> SIM
-    API --> STU
-    API --> TEL
-    SIM --> ENG
-    STU --> ENG
-    FE <--> DB
-    API <--> DB
-    OPT --> FN --> MPC
-    CFG --> FN
-    SER --> CFG
+**가장 값진 자산. 그대로 유지한다.** DP도 같은 물리를 쓰고 오히려 더 자주 부른다.
+
+```
+F_aero  = 0.5·ρ·Cd·A_f·v_rel²      (v_rel: 차량 헤딩 기준 상대풍속)
+F_roll  = Crr·m·g·cos(θ)
+F_slope = m·g·sin(θ)
+F_acc   = m·a                       (a = (v-v_prev)/dt, dt>0 가드 필수)
+P_drive = (ΣF)·v / (η_drive·η_motor·η_inv)
+P_gen   = 일사량 · A_solar · η_solar
 ```
 
-**현재 대비 바뀌는 것**
+배터리: SOC-OCV 12점 룩업 + 내부저항
+```
+V_ocv = interp(SOC, ocv_soc, ocv_V) · HV_S
+R_eq  = R_cell · HV_S / HV_P
+I     = (V_ocv - sqrt(V_ocv² - 4·R_eq·P_batt)) / (2·R_eq)
+SOC  -= I·dt / HV_Capa
+```
+**주의**: `sqrt` 안이 음수가 되면 NaN이 전체로 번진다(실제 발생 이력).
 
-| 항목 | 현재 (1-1) | 변경 후 (1-2) |
+모터 디레이팅: `ω_max = V_terminal/(K_v·√6)` → `v_max = ω_max·r_wheel·3.6`
+
+경사: 20m 원본은 고도 노이즈가 과대증폭 → **500m 이동평균 후** 판정.
+판정식 `Crr·cos(θ) + sin(θ)`의 부호(내리막 음수).
+
+주요 함수: `read_path()` `cal_drive_res()` `update_soc()` `gen_solar()`
+`compute_lookahead()` `compute_required_pace()` `compute_motor_derating()`
+`calender_handler()` `control_stop_handler()` `compute_vehicle_energy()`
+`run_simulation(params, route, env_data, ..., cfg, progress_cb)`
+
+### 2.2 제어기 — `mpc/mpc_controller.py` (116줄) ← **교체 대상**
+
+`mpc_speed(step, params, const)`가 규칙을 누적한 뒤 상한으로 자른다.
+
+| 단계 | 기준 | 방식 |
 |---|---|---|
-| 앱 개수 | 2개 (Streamlit Cloud + 오라클) | **1개** (오라클) |
-| 프론트엔드 | Streamlit (Python) | **HTML + CSS + JS** |
-| 시뮬레이션 실행 | 앱 프로세스 안에서 직접 | **서브프로세스 + 진행률 폴링** |
-| CORS | `allow_origins=["*"]` | **불필요** (same-origin) |
-| 로그 | 없음 (`DEVNULL`로 버려짐) | 요청·실행 이력·에러 (총 200MB 상한) |
-| 경로 애니메이션 | 진행률과 무관한 장식용 반복 | **실제 진행률 반영** |
-| 계산 엔진 | Python 공용 모듈 | **동일** — 손대지 않고 그대로 재사용 |
+| LV1 | SOC | `v_min ~ v_soc_high` 선형보간(기저속도) |
+| LV2 | 경사 look-ahead + 직전 가속도 | `slope_k` 비례 감속, momentum이 오르막 페널티 완화 |
+| LV3 | 일사량 비율 | `radi_para` 비례, `radi_risk·표준편차`로 불확실성 할인 |
+| LV4 | 에너지 예산 | 잔여구간 필요SOC 대비 부족분에 `energy_v` 비례 감속 |
+| LV5 | 정면풍 | `winddir_para` 비례, 대칭 클리핑 |
+| LV8 | 시간 예산 | 전체·다음CS 페이스 2신호를 SOC 여유로 3항 가중평균 |
 
-### 설계 원칙 두 가지 〔두 구조 공통〕
+**클리핑 순서(중요)**: `v_min` 하한 → `soc_cutoff` 하드컷 → LV8 →
+물리 상한(`v_max_derated`, `drive.v_max`) → **법정 속도제한** →
+EMA+tanh 댐퍼.
+법정 속도제한이 `v_min`보다 **뒤**여야 한다. 앞이면 `v_min`(60)이
+CS 진입 25km/h를 덮어써 규정 위반이 된다.
 
-**① 설정은 전역이 아니라 `cfg` 인자로 전달한다.**
-모든 설정값(`physics`/`solar`/`cell`/`pack`/`power`/`drive`/`race`/`simpara`)은
-모듈 전역 싱글턴이 아니라 `cfg` → `const` dict로 함수에 전달됩니다. Streamlit
-Cloud는 여러 사용자가 **서버 프로세스 하나를 공유**하기 때문에, 전역을 쓰면 한
-사용자의 설정 변경이 그 순간 접속 중인 모든 사용자에게 새어 나갑니다.
-실제로 이 버그가 두 번 발생했고(`progress/28`, `progress/36`) 둘 다 수정됐습니다.
-**`run_simulation()`/`mpc_speed()`를 직접 호출하는 코드를 새로 쓸 때는 최신
-시그니처(`cfg`/`const` 인자)를 반드시 확인하세요.**
+LV6은 결번, 구 LV7은 LV4에 병합됨.
 
-> 🔒 **이 원칙은 Streamlit을 걷어내도 그대로 유효합니다.**
-> FastAPI 서버도 여러 사용자가 프로세스 하나를 공유하는 건 똑같습니다(오히려
-> 스레드/async가 섞여 더 까다롭습니다). "Streamlit 때문에 만든 패턴"으로 오해해서
-> 마이그레이션 중에 `cfg` 인자를 걷어내면 `progress/28`·`36`의 버그가 그대로
-> 되살아납니다. **전역 싱글턴으로 되돌리지 마세요.**
+### 2.3 설정 — `Configs/Vehicle_Params.py`
 
-**② 탐색 공간은 한 곳에서만 정의한다.**
-웹 런처가 `scripts/main.py`의 `build_objective()`를 import해서 씁니다. CLI로
-돌리든 웹으로 돌리든 파라미터 범위가 갈라지지 않습니다.
+dataclass 8종 + `build_default_cfg()`.
+
+| 항목 | 값 | 항목 | 값 |
+|---|---|---|---|
+| 질량 | 250 kg | Crr | 0.001 |
+| Cd | 0.081 | 전면적 | 1.0 m² |
+| 구동계 효율 | 0.99 | 공기밀도 | 1.225 |
+| 패널 | 6.0 m², 27% | **회생제동 효율** | **0.60 (추정)** |
+| 셀 | Molicel P60B 6000mAh | 내부저항 | 0.0128 Ω |
+| HV팩 | 40S3P ≈2,592Wh | LV팩 | 5S2P ≈216Wh |
+| 모터 | 1800W/150V, Kv 0.45 | 휠반경 | 0.275 m |
+| **모터/인버터 효율** | **0.97/0.95 (추정)** | 이론최고속 | ~155 km/h |
+| 주행 LV소비 | 50W | CS충전 LV | 25W |
+| `soc_hard_stop` | 0.10 | `max_v_delta` | 2 m/s |
+| 신호등/보행자 대기 | 15s / 10s | `decel_brake` | 0.7g (**미사용**) |
+
+레이스: 출발 2027-08-23 08:00, 주행 08:00~17:00, 총 3,038,326m,
+CS 9개(위치·오픈·마감 시각), 구간평균 60km/h 하한, 출발 최소 SOC 0.2.
+
+> **굵은 값들이 카탈로그·이론값이다.** 실측 교체가 L3의 목적.
+
+### 2.4 설정 전달 규칙 — **반드시 지킬 것**
+
+설정은 전역 싱글턴이 아니라 **`cfg` → `const` dict로 인자 전달**한다.
+여러 사용자가 서버 프로세스를 공유할 때 전역을 고치면 모든 사용자의
+결과가 바뀐다(**실제로 2회 발생**). `run_simulation()`/`mpc_speed()`
+시그니처에 `cfg`/`const`가 있는 이유다.
+
+### 2.5 최적화 — `scripts/main.py`
+
+`build_objective()` → `(objective, context)`. **탐색공간 정의는 여기 한 곳뿐.**
+
+```
+완주 시   score = 평균속도[km/h]
+미완주 시 score = 도달률 - 2      (범위 [-2,-1])
+목적값 = 고정 5개 날씨의 평균
+```
+
+**날씨를 고정하는 이유(common random numbers)**: 매번 새 날씨를 뽑으면
+"운 좋은 날씨를 만난 trial"이 이겨서 실력 비교가 불가능하다.
+섭동은 지점별 독립 난수가 아니라 **CS 구간(leg) 단위로 공유되는 z값**
+— 실제 날씨는 전선 단위로 뭉쳐 움직인다.
+
+현재 탐색 파라미터 12개: `v_min` `v_soc_high` `soc_ramp_high`
+`soc_ramp_low` `slope_k` `radi_para` `radi_risk` `energy_v`
+`winddir_para` `margin_total` `margin_next_cs` `soc_cutoff`
+
+> `run_cli()`가 스모크테스트 설정(`n_trials=2`, `_test` storage)이다.
+> 본 탐색 전 `n_trials=50`, `study_name="WSC_MPC_Opt"`,
+> `storage="sqlite:///outputs/optuna_study.db"`로 되돌릴 것.
+
+### 2.6 텔레메트리 디코더 — `telemetry/`
+
+네트워크 의존 0. 순수 함수.
+
+**값 해석(실측 검증 완료)**: CAN 8바이트 = **리틀엔디안 float32 두 개**.
+```python
+raw = bytes.fromhex(hex_str)[::-1]      # ★ 로그 hex는 뒤집혀 인쇄된다
+seg_one = struct.unpack("<f", raw[0:4])[0]
+seg_two = struct.unpack("<f", raw[4:8])[0]
+```
+`canlog.csv` 41,397행 대조 결과 **87.74% 일치**. 100%가 아닌 건 정수·
+비트필드 프레임을 로그 도구가 억지로 float으로 찍었기 때문. **87% 아래면
+엔디안 처리가 틀린 것**(잘못된 해석 3종은 전부 14%대).
+
+검증: `python scripts/verify_can_decode.py` (인자 없으면 `specs/canlog.csv`)
+
+**주의 1**: NaN/Inf가 나오는 프레임이 있다(float 쌍이 아닌 것들). JSON으로
+보낼 때 `NaN`은 표준에 없는 리터럴이라 거부된다 → `None`으로 치환하되
+**raw 바이트는 보존**해야 나중에 정수로 재해석할 수 있다.
+
+**주의 2**: `parse_udp_packet()`이 CAN ID를 **리틀엔디안**으로 읽는데
+**원본 Java는 빅엔디안**이다(`ByteBuffer` 기본값). 원본은 13년간 실제
+하드웨어로 검증된 코드다. **이 함수는 아직 아무도 검증하지 않았다**
+(87.74%는 CSV 경로라 이 함수를 타지 않음). 실시간 수신을 쓸 일이 생기면
+실제 패킷 1개를 양쪽으로 파싱해 `specs/can_signals.csv`의 108개 ID와
+대조하면 즉시 판별된다.
+
+### 2.7 CAN 명세 — `specs/`
+
+- `CAN_수신_데이터_정리본.xlsx` — 원본 명세. **읽기 전용으로만 열 것**
+  (도형·이미지 포함 → openpyxl로 저장하면 소실). CAN ID 114개:
+  BMS(HV) 66 확정 / MPPT 21 확정 / Motor 13 잠정(VCU 미확정) / BMS(LV) 14 잠정
+- `can_signals.csv` — 위를 기계가 읽는 형태로 변환한 것. **108행**
+  (명세 114개와 **6개 차이**, BMS(HV) 60 vs 66 — 미해결)
+- `can_signal_rates.csv` — 전송 주기 정책(**임의 설정값**)
+  - 10Hz 12개: BMS PRIMARY 10 (`0x040~047`,`0x6F4`,`0x6FA`) + `0x402`,`0x403`
+  - 1Hz 96개
+  - 근거: 태양광차는 포뮬러급 과도현상이 없다. 단 `0x403`은 **미분해서
+    가속도를 얻고**(가속도 CAN 신호가 없음), 전류는 **I²R 손실이 제곱이라
+    평균값으로 계산하면 과소평가**되므로 해상도가 필요하다.
+- `canlog.csv` — 검증용 샘플 로그 41,397행
+
+주요 신호: `0x041`×`0x042` 팩 전압×전류(전력) · `0x043`/`0x047` SOC ·
+`0x311` MPPT 출력(발전) · `0x402` Bus V/I · `0x403` 차속 ·
+`0x40B` 모터/히트싱크 온도 · `0x04C`/`0x04D` 셀 온도 · `0x6FA` LV 팩
 
 ---
 
-## 2. 구동 원리
+## 3. 앞으로 만들 것
 
-### 시뮬레이션 1스텝 (`run_simulation()` 루프, 경로 포인트마다 반복)
+### 3.1 비용함수 — 거리로 매개변수화
 
-```
-경로/기상 조회 → lookahead(향후 발전량·경사) → 필요 페이스(전체 완주·다음 CS)
-  → 모터 디레이팅 → 법정 속도제한 조회
-  → mpc_speed(step, params, const)   ← 여기서 권장속도 결정
-  → dt 계산 → 컨트롤스탑 정차 처리 → 종료조건 검사(SOC/마감시각/27일)
-  → 주행저항·발전량으로 SOC 갱신
-```
-
-종료 시 `(DataFrame, termination_reason)`을 반환하고, 앱이 이 사유로 결과 분석
-메시지를 분기합니다(SOC 부족 / CS 마감초과 / 구간평균속도 미달 / 27일 초과 / 완주).
-
-### `mpc_speed()` — 기저 속도 + 보정 누적 + 상한 클립
+상태 `x = (t, SOC, T_m, T_b)`, 제어 `v`, 독립변수 `s`(거리)
 
 ```
-LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 에너지예산
-→ LV5 정면풍 → LV8 필요페이스 가중평균 → 물리/법정 상한 클립 → EMA+tanh 댐퍼
+dt   = ds/v
+dSOC = -(P_batt(v,θ,wind,irr) / E_pack)·dt
+dT   = ((P_loss - hA(T - T_amb)) / mc)·dt
 ```
 
-단계별 상세는 아래 [MPC 속도 결정 로직](#mpc-속도-결정-로직) 참고.
-
-### Optuna 파라미터 탐색
-
-12개 파라미터를 TPE로 샘플링 → **고정된 5개 날씨 시나리오** 각각에서 시뮬레이션
-→ 평균 점수(완주 시 평균속도 km/h, 미완주 시 `완주율 - 2`).
-
-날씨를 고정하는 이유는 **common random numbers** — 매 trial마다 새 날씨를 뽑으면
-"운 좋은 날씨를 만난 trial"이 이겨버려서 파라미터의 실력을 비교할 수 없습니다.
-날씨 섭동은 포인트별 독립 노이즈가 아니라 **CS 구간(leg) 단위로 공유되는 z값**으로
-흔듭니다 — 실제 날씨는 전선 단위로 뭉쳐서 움직이기 때문입니다.
-
-### Optuna 웹 런처 (`server/`)
-
+**[A] 시간 최소화 + 에너지 제약** ← 시작점
 ```
-로그인(Supabase 토큰 검증) → 대기열(동시 실행 1개 제한)
-  → subprocess로 별도 프로세스 실행 → 진행률/예상시간 표시
-  → 20 trial마다 optuna_runs 테이블에 체크포인트
-  → 완료 후 Streamlit 앱에서 "이 파라미터로 시뮬레이션하기"로 바로 적용
+min Σ ds_i/v_i
+s.t. SOC ≥ SOC_min, t(CS_k) ≤ 마감_k, v_min ≤ v ≤ v_cap
+```
+튜닝 파라미터가 사실상 없다. 라그랑주 완화 시 승수가 **λ**이고 구간별로 분리:
+```
+v* = argmin_v (1 + λ·P_batt(v)) / v
 ```
 
-- **왜 별도 프로세스인가**: `study.optimize()`가 블로킹 호출이라 FastAPI 안에서
-  돌리면 다른 요청까지 막히고, GIL 때문에 스레드로는 CPU-bound 순수 Python
-  루프의 진짜 병렬이 안 됩니다.
-- **디스크 로테이션**: 무료 인스턴스의 작은 디스크가 차면, 지금까지의 best_params를
-  `enqueue_trial`로 이어받은 새 study로 교체해서 탐색을 계속합니다. 결과는 이미
-  Supabase에 체크포인트로 남아 안전합니다.
+**[B] 소프트 제약** — 하드 제약은 DP 격자에 해가 없는 칸을 만든다.
+소프트면 "얼마나 위반했는지"가 보여 디버깅이 쉽다. **개발 초기엔 B, 확정 후 A.**
+```
+J = Σ [ds/v + ρ_soc·max(0, SOC_min-SOC)² + ρ_t·max(0, t-마감)²]
+```
+
+**[C] 부드러움** `+ w_Δ(v_i - v_{i-1})²` — EMA+tanh 댐퍼를 원리적으로 대체
+**[D] 열 비용** `+ w_T·max(0, T-T_warn)²` — 하드 상한보다 부드럽다
+
+> **원칙**: 항을 추가할 때마다 가중치가 생기고 그게 다시 튜닝 대상이 된다.
+> 파라미터 12개를 없애려는 건데 가중치를 붙이면 제자리다. **A로 시작할 것.**
+
+### 3.2 DP — 왜 거꾸로인가
+
+```
+V(s, x) = min_v [ ds/v + V(s+1, f(x,v)) ]
+```
+우변에 `V(s+1)`이 필요하니 **끝에서부터** 채운다.
+
+**시뮬레이션(앞으로)은 경로 하나만 방문한다.** "이 파라미터가 몇 점"은
+알아도 "SOC 40%에서 오르막이면 얼마"는 모른다. **DP는 달리지 않고 모든
+상태 칸을 전수 계산**한다. 그래서 결과가 표다.
+
+여러 날씨에 로버스트하게:
+```
+V(s,x) = min_v (1/K)·Σ_k [ ds/v + V(s+1, f_k(x,v)) ]
+```
+**표는 '날씨와 무관'해질 수 없다.** 어떤 날씨를 가정하고 만드느냐가
+로버스트성을 정한다. 낙관적으로 만들면 흐린 날 무너지고, 보수적으로
+만들면 맑은 날 손해 본다. Optuna의 고정 5개 날씨 평균이 그대로 전이된다.
+(`prototype/toy_dp_weather.py`가 이 차이를 실제로 보여준다)
+
+**실행 중 적응은 상태를 통해 일어난다** — 날씨가 나쁘면 SOC가 계획보다
+낮아지고, 표가 자동으로 다른 칸을 참조해 느린 속도를 낸다.
+표가 못 하는 건 **앞으로 올 날씨를 미리 아는 것**뿐이다.
+
+### 3.3 표 구조 — 하나로 만들면 터진다
+
+uint8(0~255 km/h) 기준 크기:
+
+| 축 구성 | 크기 |
+|---|---|
+| 거리600 × SOC100 | 0.1 MB |
+| + 시각200 | 12 MB |
+| + 모터온도30 | 360 MB |
+| + 배터리온도30 | **10.8 GB** ✗ |
+
+**해법 — 의미 단위로 셋으로 쪼갠다**
+
+| 표 | 축 | 크기 | 의미 |
+|---|---|---|---|
+| **A. λ** | 거리600 × SOC100 × 시각편차100 | 6 MB | 에너지가 얼마나 귀한가(전략) |
+| **B. 속도** | λ50 × 경사40 × 정면풍20 | 0.04 MB | 그 가격에 이 지형이면 얼마(전술) |
+| **C. 열 상한** | 모터온도60 × 배터리온도60 | 0.004 MB | 열 때문에 못 넘는 선(제약) |
+
+합계 **6 MB** (1800배 축소). 가능한 이유: **온도는 속도를 "결정"하지 않고
+"제한"한다** → 곱하지 않고 마지막에 자른다.
+
+현장 조회:
+```
+λ    = A[거리, SOC, 시각편차]
+v    = B[λ, 경사, 정면풍]
+권장 = min(v, C[모터온도, 배터리온도])
+```
+
+**시간 축 주의**: "남은시간 / 다음CS마감까지 / 일정편차"는 전부
+`(거리, 시각)`에서 파생된다. **축을 늘리지 말 것.**
+
+**파일 형식**: B·C는 **CSV**(눈으로 확인 가능, Java가 몇 줄로 읽음),
+A는 **바이너리**(헤더 + uint8 배열). Parquet은 Java 라이브러리가 필요해
+제외 — 현장에선 의존성 없는 게 최고다.
+
+### 3.4 열 모델 — 신규
+
+**현재 물리엔진에 온도 항이 아예 없다.**
+
+```
+dT/dt = (P_loss - hA·(T - T_amb)) / (mc)
+```
+`P_loss`는 이미 아는 I²R, 미지수는 **`mc`와 `hA` 두 개뿐**.
+→ **회색상자 권장**: 물리 구조를 주고 계수만 데이터로 피팅. 신경망은
+이 방정식을 데이터로 재발견해야 해서 데이터가 훨씬 많이 든다.
+
+**즉시 필요한 수정**: `scripts/main.py`의 `ENV_NEEDED_COLS`가 메모리
+절약을 위해 **`temperature_2m`을 버리고 있다.** 되살려야 한다
+(`env_data.csv`에는 이미 들어있다).
+
+디레이팅 임계는 WaveSculptor22 매뉴얼 + 실측 확인.
+
+**이건 별개 기능이 아니다.** 오르막 → 전류↑ → I²R 손실 제곱 증가 →
+온도↑ → 디레이팅. 지금 `slope_k`로 눌러둔 부분에 물리 근거가 생기는 것.
+
+### 3.5 룰베이스 처분표
+
+| 현재 | 처분 | 이유 |
+|---|---|---|
+| LV1 SOC 기저속도 | 삭제 | SOC가 상태가 되고 λ가 그 역할 |
+| LV2 경사+momentum | 삭제 | `F_slope`로 동역학에. 운동에너지는 DP가 알아서 |
+| LV3 일사량 | 삭제 | 발전량이 SOC 동역학에 |
+| ↳ `radi_risk` | **유지** | 예보 불확실성 할인 → 보수적 예측치로 DP를 도는 손잡이 |
+| LV4 에너지 예산 | 삭제→**λ** | 균등배분 순환논리 해소 |
+| LV5 정면풍 | 삭제 | `F_aero` 상대속도로 |
+| LV8 페이스 블렌딩 | 삭제 | 시간 제약이 최적화 내부로 |
+| 속도 클리핑 4종 | 유지 | 제약조건으로 |
+| `soc_cutoff` 하드컷 | 유지 | 안전장치 |
+| EMA+tanh 댐퍼 | 선택 | [C]항 또는 변화율 제약으로 |
+
+**파라미터 12개 → 2~4개** (`soc_min`, `radi_risk`, 선택 `w_Δ`, 격자 해상도)
+
+> **기존 LV1~LV8을 지우지 말 것.** A/B 비교 기준선으로 남긴다.
+> `build_objective()` 하네스로 같은 5개 날씨에서 바로 비교된다.
+
+**하드 세이프티는 두 겹**: `soc_cutoff`·`speed_limit`은 표를 만들 때
+반영하고 **현장에서 한 번 더 클립**한다. 표가 틀렸을 때의 마지막 방어선.
 
 ---
 
-## 3. 현재 진행 상황 (2026-08-05)
+## 4. 진행 순서
 
-| # | 단계 | 상태 |
-|---|------|------|
-| 1 | 경로·환경 데이터 수집 / 차량 물리 모델 | **완료** |
-| 2 | Rule-based MPC (LV1~LV5 ramp + LV8 페이스 블렌딩) | **완료** |
-| 3 | Streamlit 시뮬레이터 UI | **완료** |
-| 4 | 웹 배포 (Streamlit Cloud + Supabase + Optuna 런처) | **완료**(HTTPS 배포 완료) |
-| 4-1 | 웹 통합 / HTML 전환 (`progress/43`) | **완료** — HTTPS 배포·검증 끝 (`progress/48`) |
-| 5 | MPC 물리 building block (코스팅/제동/내리막 캡) | **진행 중** |
-| 6 | 비용함수 기반 MPC로 전환 | 설계 논의만 완료 |
-| 7 | AI 예측 모델 (발전량 / 소비전력) — `ai_models/` | 미착수 |
-| 8 | 강화학습 실험 — `rl/` | 미착수 |
-| 9 | 실측 데이터 교체 / CAN 텔레메트리 축 | **Phase 1 구현** — 업로드·파싱·조회, 물리 상수 교체는 보류 |
+1. **`temperature_2m` 되살리기** (`scripts/main.py`, 한 줄)
+2. **코스팅·제동·내리막 캡** — 설계는 원본 저장소 `progress/22`에 있음
+   - `a_coast = (F_aero+F_roll+F_slope)/m`
+   - `coast_distance = v²/(2·a_coast)`, `v_entry_max = √(v_exit² - 2·a_coast·L)`
+   - 내리막(`a_coast ≤ 0`)은 `simpara.decel_brake`(0.7g, 회생제동 배제)
+   - 코스팅 중 `P_batt = power.P_LV_race`만(배터리 안 거침)
+3. **DP 프로토타입** — **먼저 거리 × SOC 2차원으로.** 시각·온도를 한꺼번에
+   넣으면 격자 문제인지 물리 문제인지 비용함수 문제인지 구분이 안 된다
+4. **시험주행 로그로 계수 보정** — `Regen_eff`, `Cd`, `Crr`, `mc`, `hA`
+5. **DP 상태에 시각·온도 추가**, 표 3분해
+6. 표 내보내기 형식 확정 + 팀원 인터페이스 합의
+7. (선택) 예보≠실제 분리, 잔차 학습, RL
 
-### 최근 완료된 것
-
-- **run_simulation() 한 사이클 계산 순서 정리** — ① 야간 경계 선처리(주행 불가
-  시간이면 속도·에너지 계산을 건너뛰고 다음날 08:00으로 점프), ② 주행 에너지/SOC
-  계산을 CS·신호등 이벤트보다 앞으로 이동("달려서 도착한 뒤 정차/충전" 순서),
-  ③ `env_row` 누락 시 인접 시간 fallback 추가(에너지 계산을 건너뛰던 '공짜 주행'
-  제거), ④ `light_arrive()` 단위/감지방식 수정 (`progress/38`, `39`, `40`)
-- **[버그 수정] `light_arrive()` 단위 불일치** — 미터와 km를 비교해 신호등 지연이
-  한 번도 발동하지 않던 오래된 버그. 이제 이전~현재 구간 안에 신호등이 들어오면
-  감지하는 방식이라 경로 포인트가 신호등을 정확히 찍지 않아도 동작 (`progress/39`)
-- **총괄 기획안 PDF** — 설계·구현·운영 전반을 정리한 15페이지 문서
-  ([`docs/`](docs/), 생성 스크립트 포함)
-- **Optuna 웹 런처(오라클) + 앱 연동** — Streamlit Cloud 무료 티어로는 탐색을 못
-  돌린다는 제약을 별도 FastAPI 서버 분리로 해결. 대기열·진행률·체크포인트·디스크
-  로테이션까지 구현. 앱 사이드바 "내 Optuna 탐색 결과"에서 결과 조회 및 적용
-  (`progress/34`). ⚠️ **아직 실제 기동 테스트 안 됨**
-- **자동 로그인 / 코드 보기** — refresh token을 브라우저 localStorage에 저장해
-  새로고침해도 로그인 유지. GitHub raw에서 주요 파일을 읽기 전용 조회 (`progress/34`)
-- **"시뮬레이션 설정" 탭 + `simpara` 세션 격리** — 신호등 대기시간, `soc_hard_stop`,
-  `max_v_delta`, `decel_brake`를 앱에서 조정 가능 (`progress/34`)
-- **[버그 수정] `mpc_controller.py`의 `simpara` 전역 참조 제거** — 속도 댐퍼가 세션
-  `cfg`가 아니라 모듈 전역을 읽고 있어 사용자가 `max_v_delta`를 바꿔도 조용히
-  무시되던 문제. 전 구간 시뮬레이션 A/B로 반영 확인 (`progress/36`)
-- **CAN 텔레메트리 Phase 1** — 실차 CAN 로그 업로드/파싱/신호 시계열 조회 축을
-  통합 웹에 추가. 물리 상수 교체는 하지 않고, 원본 raw bytes와 검증용 float segment를
-  Supabase에 저장하는 단계까지 구현 (`progress/54`)
-- **`scripts/main.py` 재구성** — `build_objective()` / `run_best_params_simulation()`
-  / `run_cli()`로 분리해 CLI와 웹 런처가 같은 탐색 공간 코드를 공유 (`progress/34`)
-- **차량 제원 계정 저장/불러오기**, **릴리즈 노트 + 첫 로그인 튜토리얼**,
-  **Supabase 로그인/기록 저장**, **종료 사유 추적 + 규칙 기반 결과 분석**
-  (`progress/25`, `26`, `30`, `32`)
-
-이전 이력 전체는 아래 [상세 진행 이력](#상세-진행-이력) 및 `progress/` 참고.
+### RL은 왜 나중인가
+지금 시뮬레이션은 **예보 = 실제**다. 여기서 RL을 학습시키면 **미래를 아는
+정책**을 배워 실전에 안 옮겨간다. 또 하드 제약(마감시각·SOC)을 잘 못 다룬다.
+상태가 1차원인 지금은 **DP가 정확하고 빠르다**. RL은 상태가 커진 뒤에 값한다.
+계산량은 문제가 아니다(스텝당 66µs → 100만 스텝이 약 1분).
 
 ---
 
-## 4. 다음에 할 일
+## 5. 겪은 버그 — 반복되는 패턴
 
-> 자세한 내용은 [`progress/55_향후_개선_과제_백로그.txt`](progress/55_향후_개선_과제_백로그.txt)
+| 무엇 | 영향 | 배운 것 |
+|---|---|---|
+| 야간 시간대 날짜 미전환 | **993 km** | 경계 조건은 A/B로 재봐야 드러난다 |
+| 거리 배열이 pandas Index | **4.2배 느림** | 성능은 추측 말고 프로파일러부터 |
+| 설정이 전역 → 사용자 섞임 | **2회 발생** | 공유 프로세스에선 전역이 곧 버그 |
+| 미터 vs km 비교(신호등) | 조용히 무동작 | 단위 불일치는 에러 없이 몇 주 간다 |
+| `dt=0` → NaN 전파 | 크래시 | 나눗셈 전 가드 |
+| NaN이 표준 JSON에 없음 | 배치 전량 손실 | 한 건이 500건을 막는다 |
+| 문서엔 "정리했다", 실제론 없음 | 재구축 불가 | 문서를 믿되 코드로 교차 확인 |
 
-### ✅ 완료 — HTTPS 배포 ([`progress/48`](progress/48_HTTPS_실배포.txt))
-
-**https://wsc-drive.duckdns.org 로 서비스 중입니다.** 평문 HTTP로 오가던 로그인
-토큰 노출을 닫았습니다. 배포 중 버그 3건(로그 client IP 누락, `optuna_runs`
-GRANT 누락, 토큰 만료 401)을 찾아 고쳤습니다 — 상세는 `progress/48`.
-
-### ✅ 완료 — Optuna 탐색 Stop 버튼 ([`progress/52`](progress/52_Optuna_탐색_중단버튼.txt))
-
-진행 중인 Optuna 탐색을 Stop 버튼으로 중단하고, 현재 trial을 마무리한 뒤
-그때까지의 최적값/result JSON을 `stopped` 상태로 저장하도록 구현했습니다.
-이 컴퓨터에는 Python이 없어 실기동 검증은 서버/다른 PC에서 이어서 해야 합니다.
-
-### 1순위 — [`docs/codex_security_tasks.txt`](docs/codex_security_tasks.txt) 보안 후속
-
-1. **Stop 버튼 실기동 검증/배포** — 오라클 서버에서 git pull + restart 후
-   `WSC_CHECKPOINT_EVERY=2`, trial 3~5 로 V-a~V-h 확인
-2. **Supabase SQL 실행 + 서버 배포 검증** — `docs/supabase_telemetry_phase1.sql` 실행 후
-   서버에서 git pull + restart, CAN 업로드 V-d~V-g 확인
-3. **Supabase 키 환경변수화** — 텔레메트리 Phase 1 머지 후 착수. 같은
-   `server/main.py`를 건드리므로 동시 진행 금지
-4. **RLS/GRANT 전수 점검 + 스키마 SQL 문서화** — `optuna_runs`에서 GRANT 누락이
-   실제로 났으므로, 3개 Supabase 테이블 스키마와 정책을 재현 가능한 SQL로 정리합니다
-5. 의존성 취약점 점검, 백업 계획 정리
-
-회원가입 모달과 서버 재시작 시 실행 상태 복원은 이미 반영됐습니다.
-
-### 남은 보안 항목 (`progress/46`에서 다음으로 미룬 것)
-
-- **레이트 리밋** — 2026-08-05 코드 반영. 서버 pull/restart 후 실배포 확인 필요
-- Supabase anon key 하드코딩 (RLS 전제하 공개 가능 값이라 급하진 않음)
-- **Optuna Stop 버튼** — 2026-08-05 코드 반영. 서버 pull/restart 후 V-a~V-h 확인 필요
-- **RLS 정책 전수 점검** — `optuna_runs`에서 GRANT가 빠져 있었으므로 다른
-  테이블도 확인할 값어치가 있습니다
-- 의존성 취약점 점검, 백업
-- HSTS를 1주일 → 1년으로 (몇 주 안정 확인 후)
-
-### 2순위 (트랙 A) — 웹 통합 / HTML 전환 (**Phase 0~6 구현 완료, 배포 확인 전**)
-> 트랙 A와 B는 서로 독립적입니다. 어느 쪽을 먼저 할지는 사용자 판단.
-Streamlit UI를 HTML/CSS/JS + FastAPI로 전환하고 Optuna 런처와 한 웹으로 합칩니다.
-**결정적 이유는 "다른 HTML 기반 웹과 합칠 예정"이라는 통합 제약**입니다
-(Streamlit은 외부 사이트에 iframe으로만 넣을 수 있음). 시인성 개선과 서버 로그는
-부차적 이유입니다. 전환 중에도 **Streamlit에 같은 UI 개선을 병행 적용**해서
-팀원 사용 경험이 안 깨지게 합니다.
-- 구조: 로그인 게이트 → 내부 셸(시뮬레이터 | Optuna | 기록 | 설정)
-- Phase 0(로깅) → 1(셸+게이트) → 2(시뮬 API) → 3(시뮬 프론트) → 4(차량제원 모달)
-  → 5(부가) → 6(전환·정리)
-- ✅ **Phase 0 완료** (PR #1) — `server/logging_conf.py` 신설, 요청/실행 로그,
-  자식 프로세스 출력을 `outputs/logs/run_{id}.log`로 보존(`DEVNULL` 제거)
-- ✅ **Phase 1 완료** (PR #1) — `static/`을 `css/tokens.css` + `js/`(auth·nav·
-  optuna·state)로 분리, 로그인 게이트 선배치. Streamlit도 병행 적용(v1.0.9,
-  비로그인 시 `render_login_gate()` + `st.stop()`)
-- ▶ **다음: Phase 2 (시뮬레이션 API)** — `shared/cfg_serde.py` 분리,
-  `server/sim_runner.py` 신설, `WSC_MAX_SIM_CONCURRENT` 슬롯 분리, 결과 CSV TTL
-- ⚠️ 1순위(런처 실기동 검증)는 **여전히 미완** — Phase 2부터는 실제 실행 검증
-  (A/B 동등성 `V2-4`)이 필요하므로 이때는 서버가 실제로 떠야 합니다
-- 상세 설계·주의사항·미해결 질문은
-  [`progress/43_웹통합_HTML전환_계획.txt`](progress/43_웹통합_HTML전환_계획.txt)
-- 실행용 지시서(Phase별 검증 조건·단계 게이트)는
-  [`docs/codex_web_migration_tasks.txt`](docs/codex_web_migration_tasks.txt)
-  — Codex 등 다른 에이전트에 작업을 넘길 때 이 파일을 전달
-- 합칠 웹: 레포 밖 별개 사이트, HTML+CSS+JS+FastAPI, **오라클과 같은 도메인**
-  (인증은 Supabase 유지) → **CORS 비이슈**. 그 사이트 디자인을 가져오고
-  오라클이 시뮬레이터+Optuna를 둘 다 서빙
-- 디자인 기준: **색은 기존 Optuna 페이지 팔레트**(녹색 `#2F6F4E` 계열),
-  레이아웃·정보 구조는 현재 Streamlit과 유사하게. 디자인 자산을 기다리지 않고
-  "임의 구성 후 수정" 방식 — 단 색·간격은 전부 `tokens.css`의 CSS 변수로만
-  정의해야 나중 교체가 싸다 (검증 `V1-5d`가 grep으로 기계 검사)
-- 🔒 **Streamlit은 Phase 6까지 유지** — `app.py`는 지금도 살아있고 팀원이 씁니다.
-  Phase별 `[B]` 트랙으로 같은 UI 개선을 병행 적용 중
-
-### 2순위 (트랙 B) — MPC 물리 building block 완성
-설계는 `progress/22`에 완료돼 있고 코드만 없는 상태입니다.
-- [x] 내리막 세그먼트 경계 배열 추출 (`scripts/main.py` 112~130줄)
-      — 단, 아래 `compute_downhill_cap()`이 없어 **현재는 계산만 하고 미사용**
-- [ ] `compute_downhill_cap(step, const)` 구현
-      — `physics`/`drive`를 전역이 아니라 `const`에서 꺼내 쓸 것
-      — 완성되면 `app.py`에도 같은 세그먼트 전처리 추가 필요 (현재 `main.py`에만 있음)
-- [ ] CS 접근 코스팅/제동 구현 (`coast_distance = v²/(2·a_coast)`, `simpara.decel_brake`)
-- [x] `simpara.decel_brake` 상수 추가(0.7g) + 앱에서 편집 가능
-      — **단 아직 물리 로직에서 미사용**
-- [x] `light_arrive()` 단위 불일치 버그 수정 — 이제 실제로 신호등 지연이 발동
-      (43개 감지·중복 방지 확인, `progress/39`)
-- [ ] 위가 끝나면 본격 Optuna 재탐색 (웹 런처로 실행 가능. CLI로 돌릴 거면
-      `run_cli()`가 아직 스모크테스트 설정이라 `n_trials=50`,
-      `study_name="WSC_MPC_Opt"`, `storage="sqlite:///outputs/optuna_study.db"`로 원복 필요)
-
-> `Functions/Vehicle_Function.py`와 `mpc/mpc_controller.py`의 의사결정/물리
-> 로직은 **사용자가 직접 작성**합니다 (`CLAUDE.md`/`AGENTS.md` 규칙).
-
-### 3순위 — 문서/인프라 정리
-- [ ] `optuna_runs` 테이블 SQL을 `SETUP.md`에 정리 (**현재 레포에 SQL 원문이 없음** —
-      Supabase 재구축 시 코드에서 역추적해야 함)
-- [ ] `SETUP.md`에 `server/` 배포 절차 링크 추가
-- [ ] 서버 보안 검토 (CORS `*`, anon key 하드코딩 — RLS 전제라 당장 위험은
-      아니지만 노출 범위 검토)
-
-### 4순위 — 예전부터 보류 중
-- [ ] 속도 정수(int) 출력 반영 (`results.append()` 시점에만 반올림, 내부 계산은 float 유지)
-- [ ] `momentum_gain`을 Optuna 탐색공간에 넣을지 결정
-- [ ] `termination_reason`을 `objective()` 스코어링에 활용할지 검토
+**가장 값비쌌던 습관**: 검증 없이 넘어간 작업. 실행 환경이 없는 채로
+머지된 코드가 여러 번 문제를 만들었다.
+→ **검증 스크립트와 샘플 데이터를 함께 두는 것**을 원칙으로.
 
 ---
 
-## 5. 실행 방법
-
-환경 구성 상세(venv, Python 버전, 같이 옮겨야 하는 파일)는 [`SETUP.md`](SETUP.md) 참고.
-
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\pip.exe install -r requirements.txt
-
-# 웹 시뮬레이터 (권장)
-.\.venv\Scripts\python.exe -m streamlit run app.py
-
-# CLI 실행 (Optuna 최적화)
-.\.venv\Scripts\python.exe scripts\main.py
-```
-
-Optuna 탐색 서버는 별도입니다 → [`server/README.md`](server/README.md)
-
-`app.py` 실행에는 `.streamlit/secrets.toml`(Supabase URL/anon key)이 필요합니다.
-이 파일은 `.gitignore`에 있으니 컴퓨터마다 새로 만들어야 합니다(`SETUP.md` 참고).
-
----
-
-## 6. 폴더 구조
+## 6. 폴더 안내
 
 ```
-Configs/            차량 제원·시뮬레이션 파라미터 (dataclass)
-  Vehicle_Params.py   VehiclePhysics, SolarPanel, BatteryCell, BatteryPack,
-                      PowerSystem, Drivesystem, RaceConfig, SimulationParameter
-                      + build_default_cfg() (세션별 독립 인스턴스 생성)
-  speed_limits_2025.csv / traffic_lights_2025.csv   실제 대회 루트 규정 데이터
-Functions/          차량 물리 계산·시뮬레이션 엔진
-  Vehicle_Function.py  주행저항·SOC·발전량 계산, run_simulation()
-mpc/                MPC 속도 플래너 (Rule-based, LV1~LV8)
-  mpc_controller.py
-Environment/        기상 데이터 수집 (Open-Meteo API)
-  Open_Meteo_API.py
-scripts/            CLI 실행 스크립트
-  main.py             Optuna 파라미터 최적화 (build_objective()는 웹 런처도
-                      import해서 재사용 - 탐색 공간 정의는 여기 한 곳뿐)
-telemetry/          실차 CAN 텔레메트리 파서/신호 정의 로더
-  decode.py           canlog.csv 바이트 역순 보정, UDP payload 순수 파서, raw bytes 보존
-  signals.py          specs/can_signals.csv 로더
-server/             Optuna 웹 런처 (오라클 서버에서만 구동, Streamlit과 별개)
-  main.py             FastAPI - 인증/대기열/진행률 API + 정적 프론트 서빙
-  study_runner.py     실제 탐색을 도는 별도 프로세스 (체크포인트·디스크 로테이션)
-  telemetry_runner.py CAN 로그를 스트리밍 파싱해 telemetry_logs/frames에 배치 저장
-  static/index.html   로그인·실행·진행률 UI (순수 HTML/JS)
-  wsc-launcher.service systemd 유닛 (재부팅 시 자동 기동)
-  README.md           서버 배포 가이드
-components/         Streamlit 커스텀 컴포넌트 (순수 HTML/JS, 빌드 불필요)
-  route_animator/     경로 진행 애니메이션
-  session_storage/    refresh token을 브라우저 localStorage에 저장 (자동 로그인)
-assets/             정적 자산
-  australia_silhouette.png  지도 배경용 호주 실루엣 (Natural Earth 데이터)
-outputs/            시뮬레이션 결과물 + Optuna DB
-  env_data.csv        305좌표 × 8일 × 12시간 = 29,280행
-  optuna_study.db     Optuna study DB (재탐색 전이라 현재 없음, 최초 실행 시 생성)
-docs/               문서
-  WSC_DriveEff_총괄기획안.pdf   설계·구현·운영 전반 총괄 기획안 (15p)
-  make_plan_pdf.py              위 PDF 생성 스크립트 (pip install reportlab 필요)
-  agent_token_remote_optuna_guide.txt   Codex 자동 실행용 원격 런처 구현 가이드
-progress/           진행상황 주제별 정리 (가장 큰 번호 = 최신 백로그)
-debug_logs/         버그 추적·디버깅 과정 기록 ((YYYY-MM-DD)_주제.txt)
-app.py              Streamlit 웹 시뮬레이터
-2027 BWSC TRACK.csv 전체 경로 GPS 데이터 (Darwin~Adelaide, 3,038km)
-SETUP.md            다른 컴퓨터로 옮길 때 환경 재현 방법
+  README.md                      ← 이 문서
+  2027 BWSC TRACK.csv            경로 3,038km (약 20m 간격, 151,932점)
+  outputs/env_data.csv           기상 305좌표 × 8일 × 12시간
+  requirements.txt  .python-version
+  Configs/    Vehicle_Params.py · speed_limits · traffic_lights
+  Functions/  Vehicle_Function.py   ← 물리 엔진, 유지
+  mpc/        mpc_controller.py     ← 교체 대상(기준선으로 보존)
+  scripts/    main.py · verify_can_decode.py
+  telemetry/  decode.py · signals.py
+  specs/      CAN 명세 · 신호정의 · 주기정책 · 샘플로그
+  prototype/  toy_dp.py · toy_dp_weather.py   ← DP 개념 데모, 바로 실행 가능
+```
+
+**실행 확인**
+```bash
+pip install -r requirements.txt
+python scripts/verify_can_decode.py      # 87.74% 나오면 정상
+python prototype/toy_dp.py               # DP가 만드는 표를 눈으로
+python prototype/toy_dp_weather.py       # 날씨 가정이 결과를 가르는 것
+```
+
+**`backup_trial260806` 브랜치에 남겨둔 것**(필요할 때만 참조):
+웹 시뮬레이터(`app.py`), Optuna 웹 런처(`server/`), Supabase 연동,
+배포 설정, `progress/` 60여 개 작업 기록, `debug_logs/`,
+총괄기획안 PDF, 구조도·흐름도 HTML.
+
+```bash
+git show backup_trial260806:progress/58_방향_재정립_계층별_로드맵.txt
+git checkout backup_trial260806 -- server/     # 통째로 되살리려면
 ```
 
 ---
 
-## MPC 속도 결정 로직
+## 7. 아직 안 정해진 것
 
-| 단계 | 기준 | 조절 방식 |
-|------|------|----------|
-| LV1 | SOC (soc_ramp_low~soc_ramp_high 구간) | v_min ~ v_soc_high 선형보간(ramp) |
-| LV2 | 경사도 look-ahead (현재~2km 앞 구간평균) + 직전 가속도(momentum) | slope_k 비례 감가속(ramp), 오르막 진입 시 momentum_gain*a로 페널티 완화 |
-| LV3 | 일사량 비율 (게이트 없이 항상 적용) | radi_para 비례, radi_risk*gen_ratio_std로 불확실성 할인(ramp) |
-| LV4 | 에너지 예산 (다중 지점 가중평균 발전량 기반, 구 LV7 병합) | energy_v 비례 감속(ramp) |
-| LV5 | 정면풍 성분 | winddir_para 비례, 대칭 클리핑(ramp) |
-| LV8 | 시간 예산 (전체완주 페이스 + 다음CS 페이스 2-신호 블렌딩) | SOC 여유(soc_cutoff 초과)에 비례해 목표 페이스로 블렌딩 |
-
-SOC가 `soc_cutoff` 이하로 떨어지면 위 결과와 무관하게 `v_min`으로 강제 고정(하드
-안전장치, `soc_hard_stop`과 함께 유일하게 계단형으로 남은 로직). 스텝 간 속도
-변화량도 EMA+tanh 댐퍼(`alpha`, `simpara.max_v_delta`)로 제한 — 빠른 오실레이션은
-감쇠, 느린 추세는 그대로 따라가되 한 번의 큰 이상치는 물리적 상한(차량 최대
-가감속 능력)에서 포화.
-
-법정 속도제한 클립은 **반드시 `v_min` 하한 클램프보다 뒤**에 와야 합니다. 순서가
-바뀌면 `v_min` 강제 로직이 그보다 낮은 속도제한(예: CS 진입 25km/h)을 덮어씁니다.
-
-LV6은 존재하지 않고(설계 당시 결번), 구 LV7(미래 일사량 추세)은 LV4에 병합됐습니다.
-파라미터 이름은 전부 LV 번호 접두어를 뗀 역할 기반 이름을 씁니다 — 로직 순서가
-바뀔 때마다 번호를 다시 매겨야 하는 문제 때문에 폐기했습니다
-(`debug_logs/(2026-07-17)_LV3_게이트_제거_LV4_LV7_병합_및_mpc_speed_리팩터링.txt`,
-`debug_logs/(2026-07-13)_LV8_시간예산_설계.txt`).
-
-### 현재 모델의 한계 (실제 MPC 정의 대비)
-
-- **없는 것**: 명시적 예측 모델 기반 수치 최적화(매 스텝 비용함수를 실제로 풂),
-  명시적 objective function, 제약조건을 최적화 내부에서 다루는 것
-  (현재는 `soc_cutoff`/`v_max`/`speed_limit` 전부 **사후 클리핑**)
-- **있는 것**: receding horizon(매 스텝 상태 재측정 후 재계산), 상태 피드백,
-  부분적 예측(`avg_gen_ratio`, `slope_ahead`)
-
-전환 순서는 합의돼 있습니다 — 위 2순위(코스팅/제동/세그먼트)를 규칙 기반으로 먼저
-완성해 물리적 타당성을 검증한 뒤, 같은 항들을 비용함수+solver로 재구성합니다.
-
----
-
-## 차량 제원 요약
-
-| 항목 | 값 |
-|------|-----|
-| 차량 질량 | 250 kg |
-| Cd | 0.081 |
-| 태양광 패널 | 6.0 m², 27% |
-| 배터리 (HV) | Molicel P60B, 40S3P, ~2,592 Wh |
-| 모터 정격 | 1,800 W, 150 V DC |
-| 최대속도 | ~155 km/h (이론) |
-
----
-
-## 상세 진행 이력
-
-<details>
-<summary>펼쳐서 보기 (2026-08-02 이전 주요 작업)</summary>
-
-- **차량 제원 계정 저장/불러오기**: `user_settings` 테이블(사용자당 1행, JSON)에
-  저장/불러오기 버튼 추가. "내 시뮬레이션 기록" 각 행에서도 그때 썼던 차량 제원을
-  불러올 수 있음 (`simulation_runs.vehicle_cfg`) (`progress/30`)
-- **[버그 수정] 차량 제원 설정이 전역 상태로 새서 모든 사용자에게 반영되던 멀티유저
-  버그**: 다이얼로그가 `Configs.Vehicle_Params`의 전역 싱글턴을 직접 mutate하고
-  있어서, 서버 프로세스를 공유하는 환경에서 한 사용자의 설정 변경이 모든 사용자에게
-  반영되던 문제. `cfg`를 인자로 넘기는 구조로 변경해 완전 격리 (`progress/28`)
-- **GitHub 레포 생성 + Streamlit Cloud 배포**: GitHub Pages 프론트 + Supabase
-  백엔드 아키텍처는 무거운 Python 연산이 핵심인 이 프로젝트엔 안 맞아 기각,
-  Streamlit 단일 배포로 결정 (`progress/24`)
-- **Supabase 로그인 + 기록 저장/조회**: 회원가입(닉네임)/로그인/닉네임 수정,
-  로그인해야 실행 가능, "결과 서버에 저장" 버튼으로 명시적 저장. Supabase
-  클라이언트는 세션별 격리(멀티유저 인증 세션 섞임 방지) (`progress/25`)
-- **종료 사유 추적 + 규칙 기반 결과 분석**: AI API 연동은 실제 과금(공개 앱이라
-  방문자가 누를 때마다 소유자 비용 발생) 문제로 기각, `run_simulation()`이
-  `(df, termination_reason)`을 반환하도록 하고 케이스별 분기 메시지로 대체
-  (`progress/26`)
-- **실제 2025 BWSC 속도제한/신호등 데이터 반영**: 공식 Route Notes PDF에서 추출한
-  CSV를 `mpc_speed()`에 연결 (`progress/20`)
-- **Optuna 날씨 섭동 CS 구간 상관화**: 포인트별 독립 노이즈 대신 CS 구간마다
-  공유되는 z값으로 흔들어 실제 날씨 패턴에 근접 (`progress/21`)
-- **오르막/내리막 지형 세그먼트 전처리** (`read_path()`): 20m 원본 slope는 고도
-  노이즈가 과대증폭돼 500m 이동평균으로 스무딩 후 판정 (`progress/22`)
-- **`run_simulation()` 함수 분리 (6/6)**: 200줄 넘던 함수를 6개 헬퍼로 분리(약
-  160줄로 축소), A/B 비교로 도달거리 차이 0.1% 확인 (`progress/14`, `19`)
-- **가속도(a) 동적 계산 + LV2 momentum 결합**: 고정 상수였던 가속도를 매 스텝
-  실측 기반으로 계산, 오르막 진입 시 직전 가속도로 페널티 완화 (`progress/16`)
-- **성능 버그 수정(4.2배)**: `dist_vals`가 numpy 배열이 아니라 pandas Index라
-  `compute_lookahead()` 샘플링 루프가 pandas 내부 경로를 타고 있었음(cProfile로
-  전체 실행시간의 74% 확인). `.to_numpy()` 한 줄로 214초 → 51초 (`progress/17`)
-- **스텝 변화량 제한을 EMA+tanh 댐퍼로 전환** (`progress/13`)
-- **MPC 파라미터 이름 전면 개편**: LV 번호 접두어 폐기, 역할 기반 이름으로 전환
-- **LV1/LV2/LV5 계단형 → 연속(ramp) 통일**, LV3 SOC 게이트 제거, LV4+LV7 병합
-- **야간 데이터 처리 버그 수정(중대)**: HR==17에 날짜 전환이 안 되던 버그,
-  A/B 테스트로 993km(35%) 도달거리 차이 확인 후 수정
-- **컨트롤스탑 규칙**(2025 실전 오픈/마감 시각 + 구간평균속도 60km/h) 실격 로직
-  완성 및 검증
-- **날씨 불확실성 반영**: common random numbers(K=5 고정 시드) 로버스트 탐색 확립
-
-</details>
+1. **표 파일 형식과 팀원 대시보드의 인터페이스** — 어떻게 읽어갈지
+2. **열 상태를 모터·배터리 각각 둘지, 하나로 합칠지** (표 크기가 갈림)
+3. `can_signals.csv` 108행 vs 명세 114개 — **6개 누락 원인**
+4. MPPT #2·#3 14개 신호의 우선순위 미기재 (#1과 같게 채우면 될 것으로 보임)
+5. 전송 주기가 **임의 설정값** — WaveSculptor22 매뉴얼·BMS 설정으로 확인 필요
+   (단 결론은 안 바뀜: CAN 버스 물리 상한이 500kbps 기준 약 3,900 frame/s)
