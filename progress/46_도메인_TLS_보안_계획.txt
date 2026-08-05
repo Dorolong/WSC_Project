@@ -1,6 +1,42 @@
 ================================================================
 도메인 + TLS + 서버 보안 계획 (2026-08-05)
 ================================================================
+[ 실행 결과 요약 - 2026-08-05, 대부분 완료 ]
+**https://wsc-drive.duckdns.org 로 HTTPS 서비스가 실제로 뜬 상태다.**
+Claude가 로컬에 있던 SSH 키(Desktop/oracle_key/ssh-key-2026-08-03.key)로
+직접 서버에 접속해 아래를 수행했다.
+
+  [완료] iptables 80/443 개방 + netfilter-persistent save
+         (22번은 건드리지 않고 ACCEPT만 삽입)
+  [완료] 오라클 Security List 80/443 개방 (사용자가 콘솔에서)
+  [완료] Caddy v2.11.4 설치
+  [완료] server/Caddyfile 배치 + caddy validate 통과
+  [완료] Let's Encrypt 인증서 발급 성공 (tls-alpn-01 챌린지)
+  [완료] uvicorn 을 --host 127.0.0.1 로 전환 (systemd 갱신)
+  [완료] iptables 에서 8000 규칙 제거 + save
+
+검증 결과 (외부에서 실측):
+  port 80  열림    port 443 열림    **port 8000 닫힘**
+  https:// 200 OK, HTTP 는 308 로 리다이렉트
+  보안 헤더 4종 모두 적용, Server 헤더 제거됨
+  /api/status 200 정상 (프록시 경유)
+  uvicorn 바인딩 127.0.0.1:8000 확인
+
+**중요 - 조사 중 발견**: progress/45 에는 "배포 안 함"으로 적혀 있었으나
+실제로는 서버가 이미 --host 0.0.0.0 으로 돌고 있었고, 외부에서 8000
+포트로 접속이 됐다. 즉 평문 노출이 문서상 예상보다 실제로 진행돼
+있었다. 지금은 닫힘.
+
+[ 남은 것 ]
+ 1. **오라클 Security List 의 8000 규칙 삭제** (사용자, 콘솔)
+    iptables 로는 이미 막혔지만 규칙을 정리해두는 게 맞다.
+ 2. **요청 로그에 client IP 추가** - 검증 V-7 실패했었음.
+    server/main.py 의 log_requests 미들웨어가 method/path/status/
+    소요시간만 남기고 접속자 IP를 아예 안 찍고 있었다.
+    -> 로컬에서 수정 완료. PR 머지 후 서버에서 git pull + restart 필요.
+ 3. 로그인 -> 시뮬레이션 -> Optuna 관통 확인 (실제 계정 필요, 미수행)
+ 4. HSTS max-age 를 1일 -> 1년으로 (며칠 안정 확인 후)
+
 [ 진행 상태 ]
   Step 0 IP 고정          **완료** - ephemeral -> reserved 전환.
                           IP가 141.147.167.152 -> **161.33.149.239** 로 바뀜
