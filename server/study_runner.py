@@ -48,6 +48,35 @@ CHECKPOINT_EVERY = int(os.environ.get("WSC_CHECKPOINT_EVERY", "20"))
 MIN_FREE_BYTES = int(os.environ.get("WSC_MIN_FREE_BYTES", str(500 * 1024 * 1024)))  # 500MB
 
 
+def _study_cancel_path(study_name):
+    return os.path.join(RESULTS_DIR, f"{study_name}.cancel")
+
+
+def _remove_if_exists(path):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _remove_sqlite_family(db_path):
+    _remove_if_exists(db_path)
+    for ext in ("-wal", "-shm"):
+        _remove_if_exists(db_path + ext)
+
+
+def _finished_count(study):
+    return sum(1 for t in study.trials if t.state.is_finished())
+
+
+def _best_from_study(study):
+    try:
+        return study.best_value, study.best_params
+    except ValueError:
+        return None, None
+
+
 def _new_sqlite_with_wal(db_path):
     """Optuna가 만들기 전에 미리 WAL 모드로 켜둠 - server/main.py가 진행 중에도
     같은 파일을 동시에 읽어서 진행률을 보여줄 수 있게 해줍니다."""
@@ -86,7 +115,7 @@ def push_checkpoint(study_name, user_id, access_token, n_completed, n_target,
         print(f"[경고] Supabase 체크포인트 저장 실패: {e}", file=sys.stderr)
 
 
-def make_progress_writer(progress_path, rotation_offset, run_started_at):
+def make_progress_writer(progress_path, rotation_offset, run_started_at, cancel_path):
     """매 trial 끝날 때마다 로컬 진행률 파일 갱신 (server/main.py의 실시간 표시·잔여시간 계산용).
     rotation_offset: 지금 활성 study가 시작되기 전까지 이미 끝낸 trial 수.
     run_started_at: 전체 실행이 시작된 시각(ISO) - 로테이션이 있어도 안 바뀜,
@@ -96,6 +125,9 @@ def make_progress_writer(progress_path, rotation_offset, run_started_at):
             done = sum(1 for t in study.trials if t.state.is_finished())
             with open(progress_path, "w", encoding="utf-8") as f:
                 json.dump({"completed": rotation_offset + done, "started_at": run_started_at}, f)
+            if os.path.exists(cancel_path):
+                print("[안내] 중단 요청 감지 - 현재 trial 완료 후 탐색을 멈춥니다.", file=sys.stderr)
+                study.stop()
         except OSError:
             pass
     return callback
@@ -116,6 +148,8 @@ def main():
 
     result_path = os.path.join(RESULTS_DIR, f"{study_name}.json")
     progress_path = os.path.join(RESULTS_DIR, f"{study_name}_progress.json")
+    cancel_path = _study_cancel_path(study_name)
+    _remove_if_exists(cancel_path)
 
     try:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -139,19 +173,29 @@ def main():
         best_value_overall = None
         best_params_overall = None
         rotation_count = 0
+        final_status = "done"
 
         while completed < n_trials_target:
             chunk = min(CHECKPOINT_EVERY, n_trials_target - completed)
-            study.optimize(objective, n_trials=chunk, callbacks=[make_progress_writer(progress_path, rotation_offset, run_started_at)])
-            completed += chunk
+            study.optimize(
+                objective,
+                n_trials=chunk,
+                callbacks=[make_progress_writer(progress_path, rotation_offset, run_started_at, cancel_path)],
+            )
+            completed = rotation_offset + _finished_count(study)
 
-            if study.trials and study.best_value is not None:
-                if best_value_overall is None or study.best_value > best_value_overall:
-                    best_value_overall = study.best_value
-                    best_params_overall = study.best_params
+            best_value, best_params = _best_from_study(study)
+            if best_value is not None:
+                if best_value_overall is None or best_value > best_value_overall:
+                    best_value_overall = best_value
+                    best_params_overall = best_params
 
             push_checkpoint(study_name, user_id, access_token, completed, n_trials_target,
                              best_value_overall, best_params_overall, status="running")
+
+            if os.path.exists(cancel_path):
+                final_status = "stopped"
+                break
 
             if completed >= n_trials_target:
                 break
@@ -165,14 +209,7 @@ def main():
                 rotation_count += 1
                 print(f"[안내] 디스크 여유공간 부족({free_bytes / 1e6:.0f}MB) - "
                       f"study 파일 정리 후 이어서 진행 (rotation {rotation_count})", file=sys.stderr)
-                try:
-                    os.remove(active_db_path)
-                    for ext in ("-wal", "-shm"):
-                        extra = active_db_path + ext
-                        if os.path.exists(extra):
-                            os.remove(extra)
-                except OSError:
-                    pass
+                _remove_sqlite_family(active_db_path)
 
                 rotation_offset = completed
                 active_name = f"{study_name}_r{rotation_count}"
@@ -188,20 +225,30 @@ def main():
                 if best_params_overall:
                     study.enqueue_trial(best_params_overall)
 
-        df, reason = run_best_params_simulation(
-            best_params_overall, context,
-            output_csv=os.path.join(RESULTS_DIR, f"{study_name}_result.csv"),
-        )
+        reason = None
+        if best_params_overall:
+            try:
+                df, reason = run_best_params_simulation(
+                    best_params_overall, context,
+                    output_csv=os.path.join(RESULTS_DIR, f"{study_name}_result.csv"),
+                )
+            except Exception as sim_error:
+                reason = f"best-parameter simulation failed: {sim_error}"
+                if final_status == "done":
+                    final_status = "error"
+        else:
+            reason = "no completed trials"
 
         push_checkpoint(study_name, user_id, access_token, completed, n_trials_target,
-                         best_value_overall, best_params_overall, status="done",
+                         best_value_overall, best_params_overall, status=final_status,
                          termination_reason=reason)
 
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump({
-                "status": "done",
+                "status": final_status,
                 "study_name": study_name,
                 "n_trials": n_trials_target,
+                "n_trials_completed": completed,
                 "best_value": best_value_overall,
                 "best_params": best_params_overall,
                 "termination_reason": reason,
@@ -210,14 +257,8 @@ def main():
 
         # 마지막 활성 study 파일(로컬 진행률 조회용)도 정리 - 결과는 이미
         # Supabase + 위 result_path에 안전하게 남아있으니 계속 안 남겨둬도 됨
-        try:
-            os.remove(active_db_path)
-            for ext in ("-wal", "-shm"):
-                extra = active_db_path + ext
-                if os.path.exists(extra):
-                    os.remove(extra)
-        except OSError:
-            pass
+        _remove_sqlite_family(active_db_path)
+        _remove_if_exists(cancel_path)
 
     except Exception as e:
         push_checkpoint(study_name, user_id, access_token, 0, n_trials_target,
@@ -230,6 +271,7 @@ def main():
                 "traceback": traceback.format_exc(),
                 "finished_at": datetime.now(timezone.utc).isoformat(),
             }, f, ensure_ascii=False, indent=2)
+        _remove_if_exists(cancel_path)
         raise
 
 

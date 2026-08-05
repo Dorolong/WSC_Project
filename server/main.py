@@ -49,6 +49,7 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "sb_publishable_IKdkodgm
 MAX_CONCURRENT = int(os.environ.get("WSC_MAX_CONCURRENT", "1"))  # 지금 서버 사양 기준 보수적으로 1
 MAX_TRIALS_PER_RUN = int(os.environ.get("WSC_MAX_TRIALS", "100"))  # 한 번 실행에 허용하는 최대 trial 수 (남용 방지)
 MAX_SIM_CONCURRENT = int(os.environ.get("WSC_MAX_SIM_CONCURRENT", "2"))
+CANCEL_GRACE_SECONDS = int(os.environ.get("WSC_CANCEL_GRACE_SECONDS", "300"))
 
 os.makedirs(STUDIES_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -90,7 +91,7 @@ QUEUE = []      # 대기 중인 run_id 리스트 (순서대로 처리)
 SIM_RUNS = {}
 SIM_QUEUE = []
 
-TERMINAL_STATUSES = {"done", "error", "lost", "interrupted"}
+TERMINAL_STATUSES = {"done", "error", "lost", "interrupted", "stopped"}
 
 
 def _now_iso():
@@ -111,6 +112,10 @@ def _study_result_path(study_name: str):
     return os.path.join(RESULTS_DIR, f"{study_name}.json")
 
 
+def _study_cancel_path(study_name: str):
+    return os.path.join(RESULTS_DIR, f"{study_name}.cancel")
+
+
 def _sim_result_path(run_id: str):
     return os.path.join(SIM_RUNS_DIR, f"{run_id}.json")
 
@@ -129,6 +134,7 @@ def _sanitize_for_state(run: dict, kind: str):
         "queued_at",
         "started_at",
         "finished_at",
+        "cancel_requested_at",
         "log_path",
         "pid",
         "interrupted_reason",
@@ -173,6 +179,82 @@ def _load_result_status(path: str):
         return None
 
 
+def _cleanup_study_files(study_name: str):
+    prefixes = (f"{study_name}.db", f"{study_name}_r")
+    try:
+        for name in os.listdir(STUDIES_DIR):
+            if not (name.startswith(prefixes[0]) or name.startswith(prefixes[1])):
+                continue
+            path = os.path.join(STUDIES_DIR, name)
+            try:
+                os.remove(path)
+                logger.info("removed study file after cancellation %s", name)
+            except OSError:
+                logger.warning("could not remove study file after cancellation %s", path)
+    except OSError:
+        logger.warning("study file cleanup failed for %s", study_name, exc_info=True)
+
+
+def _parse_iso(value: str | None):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _push_stopped_checkpoint(run: dict):
+    access_token = run.get("access_token")
+    if not access_token:
+        return
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/optuna_runs?on_conflict=study_name",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "apikey": SUPABASE_ANON_KEY,
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal",
+            },
+            json={
+                "study_name": run["study_name"],
+                "user_id": run["user_id"],
+                "n_trials_completed": 0,
+                "n_trials_target": run["n_trials"],
+                "best_value": None,
+                "best_params": None,
+                "status": "stopped",
+                "termination_reason": "cancelled before start",
+                "updated_at": _now_iso(),
+            },
+            timeout=15,
+        )
+    except Exception:
+        logger.warning("queued cancellation checkpoint failed run_id=%s", run.get("run_id"), exc_info=True)
+
+
+def _terminate_run_process(proc, pid):
+    if proc is not None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=10)
+        return
+
+    if not _pid_alive(pid):
+        return
+    try:
+        os.kill(int(pid), 15)
+        time.sleep(2)
+        if _pid_alive(pid):
+            os.kill(int(pid), 9)
+    except (OSError, TypeError, ValueError):
+        logger.warning("could not terminate restored pid=%s", pid, exc_info=True)
+
+
 def _restore_optuna_run(raw: dict):
     run = dict(raw)
     run.pop("kind", None)
@@ -189,11 +271,11 @@ def _restore_optuna_run(raw: dict):
         run["status"] = "interrupted"
         run["interrupted_reason"] = "server restarted before queued Optuna run could start"
         run["finished_at"] = _now_iso()
-    elif status == "running" and not _pid_alive(run.get("pid")):
+    elif status in {"running", "stopping"} and not _pid_alive(run.get("pid")):
         run["status"] = "lost"
         run["interrupted_reason"] = "server restarted and Optuna worker process is no longer alive"
         run["finished_at"] = _now_iso()
-    elif status not in {"running", "finished_process", "done", "error", "lost", "interrupted"}:
+    elif status not in {"running", "stopping", "finished_process", "done", "error", "lost", "interrupted", "stopped"}:
         run["status"] = "lost"
     return run
 
@@ -330,7 +412,7 @@ def verify_user(authorization: str | None):
 
 
 def _active_count():
-    return sum(1 for r in RUNS.values() if r["status"] == "running")
+    return sum(1 for r in RUNS.values() if r["status"] in {"running", "stopping"})
 
 
 def _active_sim_count():
@@ -424,7 +506,7 @@ def _watcher_loop_persistent():
         with _lock:
             changed = False
             for run in RUNS.values():
-                if run["status"] != "running":
+                if run["status"] not in {"running", "stopping"}:
                     continue
                 proc = run.get("process")
                 if proc is not None and proc.poll() is not None:
@@ -440,6 +522,25 @@ def _watcher_loop_persistent():
                     run["status"] = "finished_process" if os.path.exists(_study_result_path(run.get("study_name"))) else "lost"
                     run["finished_at"] = _now_iso()
                     changed = True
+                elif run["status"] == "stopping":
+                    requested_at = _parse_iso(run.get("cancel_requested_at"))
+                    elapsed = (
+                        datetime.now(timezone.utc) - requested_at
+                    ).total_seconds() if requested_at else 0
+                    if elapsed > CANCEL_GRACE_SECONDS:
+                        logger.warning("cancel grace timed out run_id=%s pid=%s", run.get("run_id"), run.get("pid"))
+                        _terminate_run_process(proc, run.get("pid"))
+                        run["status"] = "stopped"
+                        run["finished_at"] = _now_iso()
+                        run["interrupted_reason"] = "graceful stop timed out"
+                        _cleanup_study_files(run.get("study_name"))
+                        cancel_path = _study_cancel_path(run.get("study_name"))
+                        try:
+                            if os.path.exists(cancel_path):
+                                os.remove(cancel_path)
+                        except OSError:
+                            logger.warning("could not remove cancel flag %s", cancel_path)
+                        changed = True
 
             _try_start_next()
 
@@ -510,8 +611,8 @@ def get_status():
         active = _active_count()
         queued = len(QUEUE)
         running_list = [
-            {"nickname": r["nickname"], "study_name": r["study_name"], "n_trials": r["n_trials"]}
-            for r in RUNS.values() if r["status"] == "running"
+            {"nickname": r["nickname"], "study_name": r["study_name"], "n_trials": r["n_trials"], "status": r["status"]}
+            for r in RUNS.values() if r["status"] in {"running", "stopping"}
         ]
         queue_list = [
             {"nickname": RUNS[run_id]["nickname"], "n_trials": RUNS[run_id]["n_trials"]}
@@ -596,6 +697,46 @@ def create_run(payload: dict, authorization: str | None = Header(default=None)):
     return {"run_id": run_id, "study_name": study_name}
 
 
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run(run_id: str, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    user_id = user.get("id")
+    with _lock:
+        run = RUNS.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="해당 실행을 찾을 수 없어요.")
+        if run["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="본인의 실행만 중단할 수 있어요.")
+
+        status = run.get("status")
+        if status in TERMINAL_STATUSES:
+            return {"run_id": run_id, "status": status}
+        if status == "queued":
+            if run_id in QUEUE:
+                QUEUE.remove(run_id)
+            run["status"] = "stopped"
+            run["finished_at"] = _now_iso()
+            run["interrupted_reason"] = "cancelled before start"
+            logger.info("cancelled queued run_id=%s user_id=%s", run_id, user_id)
+            _push_stopped_checkpoint(run)
+            _save_runs_state_unlocked()
+            _try_start_next()
+            return {"run_id": run_id, "status": "stopped"}
+        if status == "running":
+            cancel_path = _study_cancel_path(run["study_name"])
+            with open(cancel_path, "w", encoding="utf-8") as f:
+                json.dump({"run_id": run_id, "requested_at": _now_iso()}, f)
+            run["status"] = "stopping"
+            run["cancel_requested_at"] = _now_iso()
+            logger.info("requested graceful cancel run_id=%s user_id=%s", run_id, user_id)
+            _save_runs_state_unlocked()
+            return {"run_id": run_id, "status": "stopping"}
+        if status == "stopping":
+            return {"run_id": run_id, "status": "stopping"}
+
+    raise HTTPException(status_code=400, detail="현재 상태에서는 중단할 수 없어요.")
+
+
 @app.get("/api/runs/{run_id}")
 def get_run(run_id: str, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
@@ -613,23 +754,38 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
         ahead_trials = 0
         if position_in_queue is not None:
             for other in RUNS.values():
-                if other["status"] == "running":
+                if other["status"] in {"running", "stopping"}:
                     other_progress = _read_progress_data(other["study_name"])
                     other_done = other_progress["completed"] or 0
                     ahead_trials += max(other["n_trials"] - other_done, 0)
             for other_id in QUEUE[:position_in_queue - 1]:
                 ahead_trials += RUNS[other_id]["n_trials"]
 
-    if status in ("finished_process", "done", "error"):
+    if status in ("finished_process", "done", "error", "stopped"):
         result_path = _study_result_path(study_name)
         if os.path.exists(result_path):
             with open(result_path, encoding="utf-8") as f:
                 result = json.load(f)
             with _lock:
-                run["status"] = result["status"]  # done | error
+                run["status"] = result["status"]  # done | stopped | error
                 run["finished_at"] = run.get("finished_at") or _now_iso()
                 _save_runs_state_unlocked()
             return {"run_id": run_id, "status": result["status"], "n_trials": n_trials, "result": result}
+        if status == "stopped":
+            return {
+                "run_id": run_id,
+                "status": "stopped",
+                "n_trials": n_trials,
+                "detail": run.get("interrupted_reason") or "Search was stopped before results were written.",
+                "result": {
+                    "status": "stopped",
+                    "study_name": study_name,
+                    "n_trials": n_trials,
+                    "best_value": None,
+                    "best_params": None,
+                    "termination_reason": run.get("interrupted_reason"),
+                },
+            }
         # 프로세스는 끝났는데 결과 파일이 아직 안 써졌으면 잠깐 더 기다리라고 안내
         return {"run_id": run_id, "status": "finalizing", "n_trials": n_trials}
 
@@ -651,7 +807,7 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
             "estimated_wait_seconds": round(ahead_trials * pace),
         }
 
-    # running
+    # running / stopping
     progress = _read_progress_data(study_name)
     trial_current = progress["completed"]
     estimated_remaining_seconds = None
@@ -670,7 +826,7 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
 
     return {
         "run_id": run_id,
-        "status": "running",
+        "status": status,
         "n_trials": n_trials,
         "trial_current": trial_current,
         "progress_pct": round(trial_current / n_trials * 100) if trial_current is not None else None,

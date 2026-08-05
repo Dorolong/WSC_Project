@@ -14,7 +14,7 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 > | 문서 | 역할 |
 > |---|---|
 > | `README.md` | 전체 요약 — 구조·원리·현재 상태·다음 할 일 (**여기서 시작**) |
-> | `progress/51_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
+> | `progress/53_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
 > | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
 > | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
 > | `docs/이해_지도.md` | **이 프로젝트를 이해하는 학습 경로** — 무엇부터, 어디까지 알아야 하는가 |
@@ -247,7 +247,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 
 ## 4. 다음에 할 일
 
-> 자세한 내용은 [`progress/51_향후_개선_과제_백로그.txt`](progress/51_향후_개선_과제_백로그.txt)
+> 자세한 내용은 [`progress/53_향후_개선_과제_백로그.txt`](progress/53_향후_개선_과제_백로그.txt)
 
 ### ✅ 완료 — HTTPS 배포 ([`progress/48`](progress/48_HTTPS_실배포.txt))
 
@@ -255,13 +255,21 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 토큰 노출을 닫았습니다. 배포 중 버그 3건(로그 client IP 누락, `optuna_runs`
 GRANT 누락, 토큰 만료 401)을 찾아 고쳤습니다 — 상세는 `progress/48`.
 
+### ✅ 완료 — Optuna 탐색 Stop 버튼 ([`progress/52`](progress/52_Optuna_탐색_중단버튼.txt))
+
+진행 중인 Optuna 탐색을 Stop 버튼으로 중단하고, 현재 trial을 마무리한 뒤
+그때까지의 최적값/result JSON을 `stopped` 상태로 저장하도록 구현했습니다.
+이 컴퓨터에는 Python이 없어 실기동 검증은 서버/다른 PC에서 이어서 해야 합니다.
+
 ### 1순위 — [`docs/codex_security_tasks.txt`](docs/codex_security_tasks.txt) 보안 후속
 
-1. **레이트 리밋** — `/api/*` 요청과 실행 생성 요청에 제한을 둬서 공개 도메인
-   스캐너/남용으로부터 서버와 Supabase verify 호출량을 보호합니다
-2. **RLS/GRANT 전수 점검 + 스키마 SQL 문서화** — `optuna_runs`에서 GRANT 누락이
+1. **Stop 버튼 실기동 검증/배포** — 오라클 서버에서 git pull + restart 후
+   `WSC_CHECKPOINT_EVERY=2`, trial 3~5 로 V-a~V-h 확인
+2. **Supabase 키 환경변수화** — Stop 버튼 작업 머지 후 착수. 같은
+   `server/main.py`를 건드리므로 동시 진행 금지
+3. **RLS/GRANT 전수 점검 + 스키마 SQL 문서화** — `optuna_runs`에서 GRANT 누락이
    실제로 났으므로, 3개 Supabase 테이블 스키마와 정책을 재현 가능한 SQL로 정리합니다
-3. Supabase anon key 취급 정리, 의존성 취약점 점검, 백업 계획 정리
+4. 의존성 취약점 점검, 백업 계획 정리
 
 회원가입 모달과 서버 재시작 시 실행 상태 복원은 이미 반영됐습니다.
 
@@ -269,6 +277,7 @@ GRANT 누락, 토큰 만료 401)을 찾아 고쳤습니다 — 상세는 `progre
 
 - **레이트 리밋** — 2026-08-05 코드 반영. 서버 pull/restart 후 실배포 확인 필요
 - Supabase anon key 하드코딩 (RLS 전제하 공개 가능 값이라 급하진 않음)
+- **Optuna Stop 버튼** — 2026-08-05 코드 반영. 서버 pull/restart 후 V-a~V-h 확인 필요
 - **RLS 정책 전수 점검** — `optuna_runs`에서 GRANT가 빠져 있었으므로 다른
   테이블도 확인할 값어치가 있습니다
 - 의존성 취약점 점검, 백업

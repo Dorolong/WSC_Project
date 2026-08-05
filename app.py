@@ -98,6 +98,13 @@ if "sim_running" not in st.session_state:
 # 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
 RELEASE_NOTES = [
     {
+        "version": "1.2.0",
+        "date": "2026-08-05",
+        "title": "Optuna 탐색 중단 버튼 추가",
+        "details": "- 진행 중인 Optuna 탐색을 Stop 버튼으로 중단하고 완료된 trial 결과를 저장하도록 추가\n"
+                    "- 중단 시 현재 trial을 마무리한 뒤 최적값과 결과 JSON을 남기도록 정리",
+    },
+    {
         "version": "1.1.2",
         "date": "2026-08-05",
         "title": "통합 웹 API 레이트 리밋 추가",
@@ -677,7 +684,15 @@ with st.sidebar:
                             .tz_convert("Asia/Seoul")
                             .strftime("%y.%m.%d %H:%M")
                         )
-                        status_label = {"running": "진행 중", "done": "완료", "error": "오류"}.get(row["status"], row["status"])
+                        status_label = {
+                            "running": "진행 중",
+                            "stopping": "중단 중",
+                            "stopped": "중단됨",
+                            "done": "완료",
+                            "error": "오류",
+                            "interrupted": "중단됨(서버 재시작)",
+                            "lost": "상태 유실",
+                        }.get(row["status"], row["status"])
                         best_val_str = f"{row['best_value']:.2f}" if row.get("best_value") is not None else "-"
                         st.caption(
                             f"{updated} · {status_label} · Trial {row['n_trials_completed']}/{row['n_trials_target']} · "

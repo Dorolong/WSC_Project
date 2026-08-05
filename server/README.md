@@ -134,6 +134,8 @@ sudo systemctl restart wsc-launcher
 - `WSC_RATELIMIT_ENABLED` — 레이트 리밋 전체 킬 스위치 (기본 `1`; 긴급 시 `0`)
 - `WSC_RATELIMIT_API_PER_MIN` — `/api/*` 요청 IP별 분당 허용량 (기본 300)
 - `WSC_RATELIMIT_RUN_PER_HOUR` — 실행 생성 요청 user_id별 시간당 허용량 (기본 20)
+- `WSC_CANCEL_GRACE_SECONDS` — Optuna 중단 요청 후 협조적 종료를 기다리는 시간
+  (기본 300초, 초과 시 자식 프로세스 강제 종료)
 - `WSC_LOG_LEVEL` — 서버 로그 레벨 (기본 `INFO`)
 
 ## 로그 확인

@@ -12,6 +12,7 @@ WorkingDirectory=/home/ubuntu/WSC_Project
 # Environment=WSC_RATELIMIT_ENABLED=1
 # Environment=WSC_RATELIMIT_API_PER_MIN=300
 # Environment=WSC_RATELIMIT_RUN_PER_HOUR=20
+# Environment=WSC_CANCEL_GRACE_SECONDS=300
 # Environment=WSC_RUNS_STATE_PATH=/home/ubuntu/WSC_Project/outputs/runs_state.json
 # --host 127.0.0.1 : Caddy 리버스 프록시 뒤에만 노출한다.
 #   0.0.0.0으로 두면 Caddy를 세워도 8000 포트로 들어오는 평문 HTTP

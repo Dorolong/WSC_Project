@@ -104,6 +104,18 @@ function rowTime(value) {
   return new Date(value).toLocaleString();
 }
 
+function optunaStatusLabel(status) {
+  return {
+    running: "Running",
+    stopping: "Stopping",
+    stopped: "Stopped",
+    done: "Done",
+    error: "Error",
+    interrupted: "Interrupted",
+    lost: "Lost",
+  }[status] || status || "-";
+}
+
 async function showHistory() {
   const client = await getSupabaseClient();
   const user = await getCurrentUser();
@@ -138,7 +150,7 @@ async function showHistory() {
     .map((row) => `
       <div class="history-item">
         <strong>${escapeHtml(row.study_name)}</strong>
-        <p class="hint">${rowTime(row.updated_at)} · ${row.status} · ${row.n_trials_completed}/${row.n_trials_target} · ${row.best_value ?? "-"}</p>
+        <p class="hint">${rowTime(row.updated_at)} · ${optunaStatusLabel(row.status)} · ${row.n_trials_completed}/${row.n_trials_target} · ${row.best_value ?? "-"}</p>
       </div>
     `)
     .join("") || "<p class=\"hint\">No Optuna history.</p>";

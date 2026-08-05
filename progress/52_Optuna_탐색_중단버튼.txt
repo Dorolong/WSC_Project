@@ -1,0 +1,70 @@
+================================================================
+Optuna 탐색 중단(Stop) 버튼 구현 (2026-08-05)
+================================================================
+
+[ 배경 ]
+사용자가 "내가 돌린 trial을 중간에 중단하고, 그만큼을 저장하는 버튼"을
+요청했다. 프로세스를 즉시 kill 하면 진행 중 trial 과 CHECKPOINT_EVERY
+경계 이후 trial 이 사라질 수 있으므로, docs/codex_stop_run_task.txt 의
+지시대로 Optuna study.stop() 기반 협조적 중단을 구현했다.
+
+[ 구현 ]
+- server/main.py
+  - POST /api/runs/{run_id}/cancel 추가.
+  - queued 런은 큐에서 제거하고 즉시 status="stopped".
+  - running 런은 outputs/study_results/{study_name}.cancel 플래그를 만들고
+    status="stopping" 으로 전환.
+  - TERMINAL_STATUSES 에 stopped 추가, stopping 은 비종료 상태로 유지.
+  - cancel_requested_at 을 runs_state.json 스냅샷에 포함.
+  - WSC_CANCEL_GRACE_SECONDS(기본 300초) 이후에도 안 멈추면 terminate/kill.
+  - stopping 도 동시 실행 슬롯을 차지하도록 _active_count() 보정.
+- server/study_runner.py
+  - 매 trial callback 에서 cancel flag 를 확인하고 study.stop() 호출.
+  - completed += chunk 버그 수정: 실제 study.trials 의 finished 수 기반으로 계산.
+  - 중단 시 status="stopped" 로 checkpoint/result JSON 저장.
+  - best_params 가 있으면 중단 시에도 최종 단일 시뮬레이션 실행.
+  - best_params 가 없으면 best_value/best_params 를 null 로 저장.
+  - cancel flag 와 sqlite/-wal/-shm 파일 정리.
+- server/static/index.html, server/static/js/optuna.js
+  - My Search 카드에 Stop 버튼 추가.
+  - queued/running/stopping 상태에서만 버튼 표시, stopping 에서는 disabled.
+  - stopped 결과 카드 표시, best_value null 일 때 "-" 표시.
+- server/static/js/auxiliary.js, app.py
+  - stopped/stopping/interrupted/lost 상태 라벨 매핑 추가.
+- app.py, server/static/data/release-notes.json
+  - v1.2.0 릴리즈 노트 추가.
+- server/README.md, server/wsc-launcher.service
+  - WSC_CANCEL_GRACE_SECONDS 운영 변수 문서화.
+
+[ 검증 ]
+- git fetch origin, git pull --ff-only: Already up to date.
+- git diff --check: 통과.
+- release-notes.json: PowerShell ConvertFrom-Json 으로 파싱 확인, 최신 v1.2.0.
+- 색상 리터럴 grep: 새로 추가된 색상 없음. 기존 index.html favicon data URI 만 감지.
+- py_compile / 로컬 서버 실기동 / V-a~V-h 실제 API 검증: 이 컴퓨터에 Python 이
+  설치되어 있지 않아 수행하지 못했다.
+  - py -0p: "No installed Pythons found!"
+  - Node 도 없어 JS 문법 검사 실행 불가.
+
+[ V-a ~ V-h 상태 ]
+- V-a 실행 후 Stop 실제 저장 확인: 실행 못 함(Python/Supabase 세션 없음).
+- V-b completed 정확도: 코드 수정 완료, 실제 실행 검증 못 함.
+- V-c queued 상태 Stop: 코드 경로 구현, 실제 실행 검증 못 함.
+- V-d 0 trial 중단: 프론트 null 방어 구현, 실제 브라우저 검증 못 함.
+- V-e 소유권 403: 코드 리뷰로 확인. cancel_run() 이 verify_user 후 user_id 비교.
+- V-f 멱등: 코드 리뷰로 확인. TERMINAL_STATUSES 면 현재 status 반환.
+- V-g grace timeout 강제 종료: 코드 구현, 실제 재현 검증 못 함.
+- V-h 정상 완료 경로 회귀: 코드상 done 경로 유지, 실제 실행 검증 못 함.
+
+[ 배포/다음 확인 ]
+커밋/푸시 후 오라클 서버에서 git pull + sudo systemctl restart wsc-launcher 필요.
+서버에서는 WSC_CHECKPOINT_EVERY=2, trial 3~5 로 V-a~V-h 를 실제 확인할 것.
+
+[ 되돌리는 방법 ]
+이 커밋을 revert 하면 Stop 버튼, /cancel API, study.stop() 콜백 변경이 함께
+되돌아간다. 배포 후 문제가 생기면 서버에서 이전 커밋으로 checkout/restart 하거나
+GitHub revert 후 pull/restart 한다.
+
+[ 상태 ]
+로컬 구현 및 정적 검증 완료. 실기동 검증과 서버 배포 필요.
+================================================================
