@@ -24,8 +24,12 @@ py -3.12 -m venv .venv
 ## 실행
 
 ```powershell
-# 웹 시뮬레이터
+# legacy Streamlit 웹 시뮬레이터
 .\.venv\Scripts\python.exe -m streamlit run app.py
+
+# 통합 HTML/FastAPI 웹 서버
+.\.venv\Scripts\pip.exe install -r server\requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000
 
 # CLI (Optuna 최적화 등)
 .\.venv\Scripts\python.exe scripts\main.py

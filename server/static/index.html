@@ -42,14 +42,59 @@
     <section id="app" class="workspace" hidden>
       <div class="account-row">
         <span id="loggedInAs"></span>
-        <button id="logoutBtn" class="link-button">Sign out</button>
+        <div class="action-row">
+          <button id="releaseNotesBtn" class="link-button" type="button">Release Notes</button>
+          <button id="tutorialBtn" class="link-button" type="button">Tutorial</button>
+          <button id="historyBtn" class="link-button" type="button">History</button>
+          <button id="codeViewerBtn" class="link-button" type="button">Code</button>
+          <button id="logoutBtn" class="link-button">Sign out</button>
+        </div>
       </div>
 
       <div class="view-tabs" role="tablist" aria-label="Views">
+        <button class="tab is-active" id="tabSimulator" type="button">Simulator</button>
         <button class="tab is-active" id="tabOptuna" type="button">Optuna Search</button>
       </div>
 
-      <section class="dashboard-grid" id="optunaView">
+      <section class="dashboard-grid" id="simulatorView">
+        <article class="card run-card">
+          <div class="status-row">
+            <strong>Simulation</strong>
+            <span id="simStatus" class="soft-text"></span>
+          </div>
+          <div class="run-controls">
+            <button class="btn" id="simRunBtn">Run Simulation</button>
+            <button class="btn secondary" id="vehicleConfigBtn" type="button">Vehicle Settings</button>
+          </div>
+          <div class="bar-track"><div class="bar-fill" id="simBar"></div></div>
+          <p class="hint" id="simText">Ready.</p>
+          <p class="err" id="simErr"></p>
+        </article>
+
+        <article class="card map-card">
+          <div class="status-row">
+            <strong>Route Progress</strong>
+            <span id="routePct" class="soft-text">0%</span>
+          </div>
+          <div class="route-map" id="routeMap">
+            <img id="routeBg" alt="" />
+            <svg viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-label="Route map">
+              <path id="routeBgPath" fill="none" vector-effect="non-scaling-stroke" />
+              <path id="routeDrivenPath" fill="none" vector-effect="non-scaling-stroke" />
+            </svg>
+          </div>
+        </article>
+
+        <article class="card progress-card" id="simResultCard" hidden>
+          <div class="metrics-grid" id="simMetrics"></div>
+          <div id="simAnalysis" class="analysis-box"></div>
+          <div id="simChart" class="chart-box"></div>
+          <button class="btn secondary download-link" id="simSaveBtn" type="button" hidden>Save Result</button>
+          <button class="btn download-link" id="simCsvBtn" type="button" hidden>Download CSV</button>
+        </article>
+      </section>
+
+      <section class="dashboard-grid" id="optunaView" hidden>
         <article class="card server-card">
           <div class="status-row">
             <strong>Server Status</strong>
@@ -83,6 +128,40 @@
   </main>
 </div>
 
+<dialog class="modal" id="vehicleConfigDialog">
+  <form method="dialog" class="modal-panel">
+    <div class="status-row modal-head">
+      <strong>Vehicle Settings</strong>
+      <button class="link-button" id="vehicleConfigClose" type="button">Close</button>
+    </div>
+    <div class="view-tabs compact-tabs" id="vehicleConfigTabs"></div>
+    <div class="config-grid" id="vehicleConfigFields"></div>
+    <div class="ocv-table-wrap" id="ocvEditor" hidden>
+      <table class="ocv-table">
+        <thead><tr><th>SOC</th><th>V</th></tr></thead>
+        <tbody id="ocvRows"></tbody>
+      </table>
+    </div>
+    <p class="err" id="vehicleConfigErr"></p>
+    <div class="modal-actions">
+      <button class="btn secondary" id="vehicleConfigLoad" type="button">Load Saved</button>
+      <button class="btn secondary" id="vehicleConfigSave" type="button">Save to Account</button>
+      <button class="btn" id="vehicleConfigApply" type="button">Apply</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal" id="auxDialog">
+  <form method="dialog" class="modal-panel">
+    <div class="status-row modal-head">
+      <strong id="auxTitle"></strong>
+      <button class="link-button" id="auxClose" type="button">Close</button>
+    </div>
+    <div id="auxBody" class="aux-body"></div>
+  </form>
+</dialog>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script type="module" src="./js/nav.js"></script>
 </body>
 </html>

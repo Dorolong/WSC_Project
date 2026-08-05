@@ -14,9 +14,11 @@
   --color-busy: #B23A2E;
   --color-busy-bg: #FBEAE7;
   --color-on-primary: #FFFFFF;
+  --color-backdrop: #23252B66;
   --color-transparent: transparent;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
 
   --space-xs: 4px;
   --space-sm: 8px;
