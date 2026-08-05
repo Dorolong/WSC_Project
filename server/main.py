@@ -77,6 +77,8 @@ async def log_requests(request: Request, call_next):
         raise
     elapsed_ms = (time.perf_counter() - start) * 1000
     logger.info("%s %s %s %s %.1fms", client, request.method, request.url.path, response.status_code, elapsed_ms)
+    if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache"
     return response
 
 # ---- 실행 상태 관리 (메모리에 보관 - 서버 재시작하면 초기화됨, 진행 중이던 것도 새로 세야 함) ----
