@@ -1,0 +1,20 @@
+# Require the repository owner to review changes before they can be merged
+# into protected branches. This only takes effect after branch protection is
+# enabled on GitHub with "Require review from Code Owners".
+
+* @Dorolong
+
+# Core simulation/decision files. Kept explicit so future owners can be added
+# per area without changing the default rule above.
+/Functions/Vehicle_Function.py @Dorolong
+/mpc/mpc_controller.py @Dorolong
+/Configs/Vehicle_Params.py @Dorolong
+/scripts/main.py @Dorolong
+/app.py @Dorolong
+
+# Repository governance and handoff docs.
+/.github/CODEOWNERS @Dorolong
+/AGENTS.md @Dorolong
+/CLAUDE.md @Dorolong
+/README.md @Dorolong
+/SETUP.md @Dorolong
