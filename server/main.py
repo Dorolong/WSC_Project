@@ -28,22 +28,27 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.logging_conf import setup_logging
+from shared.cfg_serde import cfg_to_jsonable
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUDIES_DIR = os.path.join(PROJECT_ROOT, "outputs", "studies")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "study_results")
 LOGS_DIR = os.path.join(PROJECT_ROOT, "outputs", "logs")
+SIM_RUNS_DIR = os.path.join(PROJECT_ROOT, "outputs", "sim_runs")
 STUDY_RUNNER = os.path.join(PROJECT_ROOT, "server", "study_runner.py")
+SIM_RUNNER = os.path.join(PROJECT_ROOT, "server", "sim_runner.py")
 
 # ---- 설정 (환경변수로 조절 가능, 없으면 기본값) ----
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://wijwbujsihhzzjzawfzp.supabase.co")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "sb_publishable_IKdkodgmKWm05tQh15bqVg_uNRqdpEO")
 MAX_CONCURRENT = int(os.environ.get("WSC_MAX_CONCURRENT", "1"))  # 지금 서버 사양 기준 보수적으로 1
 MAX_TRIALS_PER_RUN = int(os.environ.get("WSC_MAX_TRIALS", "100"))  # 한 번 실행에 허용하는 최대 trial 수 (남용 방지)
+MAX_SIM_CONCURRENT = int(os.environ.get("WSC_MAX_SIM_CONCURRENT", "2"))
 
 os.makedirs(STUDIES_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(SIM_RUNS_DIR, exist_ok=True)
 
 logger = setup_logging(LOGS_DIR)
 logger.info("WSC Optuna launcher starting")
@@ -68,6 +73,8 @@ async def log_requests(request: Request, call_next):
 _lock = threading.Lock()
 RUNS = {}       # run_id -> {user_email, study_name, n_trials, process, status, queued_at, started_at}
 QUEUE = []      # 대기 중인 run_id 리스트 (순서대로 처리)
+SIM_RUNS = {}
+SIM_QUEUE = []
 
 
 def _cleanup_run_logs(keep: int = 50):
@@ -91,6 +98,48 @@ def _cleanup_run_logs(keep: int = 50):
 _cleanup_run_logs()
 
 
+def _cleanup_sim_outputs(keep_per_user: int = 5, ttl_seconds: int = 24 * 60 * 60):
+    now = time.time()
+    grouped = {}
+    try:
+        for name in os.listdir(SIM_RUNS_DIR):
+            if not name.endswith(".json") or name.endswith("_progress.json") or name.endswith("_figure.json"):
+                continue
+            run_id = name[:-5]
+            result_path = os.path.join(SIM_RUNS_DIR, name)
+            try:
+                with open(result_path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            user_id = data.get("user_id", "_unknown")
+            grouped.setdefault(user_id, []).append((run_id, result_path, os.path.getmtime(result_path)))
+    except OSError:
+        logger.exception("sim output cleanup failed")
+        return
+
+    remove_ids = set()
+    for rows in grouped.values():
+        rows.sort(key=lambda x: x[2], reverse=True)
+        for run_id, _, mtime in rows:
+            if now - mtime > ttl_seconds:
+                remove_ids.add(run_id)
+        for run_id, _, _ in rows[keep_per_user:]:
+            remove_ids.add(run_id)
+
+    for run_id in remove_ids:
+        for suffix in (".json", ".csv", "_progress.json", "_figure.json", "_payload.json"):
+            path = os.path.join(SIM_RUNS_DIR, f"{run_id}{suffix}")
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                logger.warning("could not remove old sim output %s", path)
+
+
+_cleanup_sim_outputs()
+
+
 def verify_user(authorization: str | None):
     """Authorization: Bearer <supabase access token> 헤더를 Supabase에 확인 요청."""
     if not authorization or not authorization.startswith("Bearer "):
@@ -108,6 +157,10 @@ def verify_user(authorization: str | None):
 
 def _active_count():
     return sum(1 for r in RUNS.values() if r["status"] == "running")
+
+
+def _active_sim_count():
+    return sum(1 for r in SIM_RUNS.values() if r["status"] == "running")
 
 
 def _try_start_next():
@@ -136,6 +189,30 @@ def _try_start_next():
         logger.info("run_id=%s process started pid=%s log=%s", run_id, proc.pid, os.path.basename(log_path))
 
 
+def _try_start_next_sim():
+    while SIM_QUEUE and _active_sim_count() < MAX_SIM_CONCURRENT:
+        run_id = SIM_QUEUE.pop(0)
+        run = SIM_RUNS[run_id]
+        payload_path = os.path.join(SIM_RUNS_DIR, f"{run_id}_payload.json")
+        log_path = os.path.join(LOGS_DIR, f"sim_{run_id}.log")
+        with open(payload_path, "w", encoding="utf-8") as f:
+            json.dump({"params": run["params"], "cfg": run["cfg"], "user_id": run["user_id"]}, f, ensure_ascii=False)
+        logger.info("starting sim run_id=%s user_id=%s", run_id, run["user_id"])
+        with open(log_path, "a", encoding="utf-8", buffering=1) as log_file:
+            log_file.write(f"{datetime.now(timezone.utc).isoformat()} starting sim run_id={run_id}\n")
+            proc = subprocess.Popen(
+                [sys.executable, SIM_RUNNER, run_id, payload_path],
+                cwd=PROJECT_ROOT,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+        run["process"] = proc
+        run["log_path"] = log_path
+        run["status"] = "running"
+        run["started_at"] = datetime.now(timezone.utc).isoformat()
+        logger.info("sim run_id=%s process started pid=%s log=%s", run_id, proc.pid, os.path.basename(log_path))
+
+
 def _watcher_loop():
     """백그라운드에서 끝난 프로세스를 정리하고, 자리 나면 대기열에서 다음 걸 시작."""
     while True:
@@ -150,6 +227,15 @@ def _watcher_loop():
                         logger.error("run finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
                     run["status"] = "finished_process"  # 아래 /api/runs 조회 시 결과 파일 보고 done/error로 확정
             _try_start_next()
+            for run in SIM_RUNS.values():
+                if run["status"] == "running" and run["process"].poll() is not None:
+                    returncode = run["process"].returncode
+                    if returncode == 0:
+                        logger.info("sim finished run_id=%s returncode=0", run.get("run_id", "?"))
+                    else:
+                        logger.error("sim finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
+                    run["status"] = "finished_process"
+            _try_start_next_sim()
 
 
 threading.Thread(target=_watcher_loop, daemon=True).start()
@@ -345,6 +431,155 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
         "progress_pct": round(trial_current / n_trials * 100) if trial_current is not None else None,
         "estimated_remaining_seconds": estimated_remaining_seconds,
     }
+
+
+def _read_sim_progress(run_id: str):
+    progress_path = os.path.join(SIM_RUNS_DIR, f"{run_id}_progress.json")
+    try:
+        with open(progress_path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"pct": 0.0, "started_at": None}
+
+
+def _sim_result_path(run_id: str):
+    return os.path.join(SIM_RUNS_DIR, f"{run_id}.json")
+
+
+@app.post("/api/sim/runs")
+def create_sim_run(payload: dict, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    run_id = uuid.uuid4().hex[:12]
+    params = payload.get("params") or {}
+    cfg = payload.get("cfg") or {}
+    nickname = (user.get("user_metadata") or {}).get("nickname") or user.get("email", "user")
+
+    with _lock:
+        SIM_RUNS[run_id] = {
+            "run_id": run_id,
+            "user_id": user.get("id"),
+            "user_email": user.get("email"),
+            "nickname": nickname,
+            "params": params,
+            "cfg": cfg,
+            "process": None,
+            "status": "queued",
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": None,
+            "log_path": None,
+        }
+        SIM_QUEUE.append(run_id)
+        logger.info("queued sim run_id=%s user_id=%s nickname=%s", run_id, user.get("id"), nickname)
+        _try_start_next_sim()
+    return {"run_id": run_id}
+
+
+@app.get("/api/sim/runs/{run_id}")
+def get_sim_run(run_id: str, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    with _lock:
+        run = SIM_RUNS.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Simulation run not found.")
+        if run["user_id"] != user.get("id"):
+            raise HTTPException(status_code=403, detail="You can only read your own simulation.")
+        status = run["status"]
+        position = SIM_QUEUE.index(run_id) + 1 if run_id in SIM_QUEUE else None
+
+    if status in ("finished_process", "done", "error"):
+        result_path = _sim_result_path(run_id)
+        if os.path.exists(result_path):
+            with open(result_path, encoding="utf-8") as f:
+                result = json.load(f)
+            final_status = result.get("status", "error")
+            with _lock:
+                run["status"] = final_status
+            return {"run_id": run_id, "status": final_status, "result": result}
+        return {"run_id": run_id, "status": "finalizing"}
+
+    if status == "queued":
+        return {"run_id": run_id, "status": "queued", "position": position, "progress_pct": 0}
+
+    progress = _read_sim_progress(run_id)
+    return {
+        "run_id": run_id,
+        "status": "running",
+        "progress_pct": round(float(progress.get("pct") or 0) * 100, 1),
+    }
+
+
+@app.get("/api/sim/runs/{run_id}/figure")
+def get_sim_figure(run_id: str, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    with _lock:
+        run = SIM_RUNS.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Simulation run not found.")
+        if run["user_id"] != user.get("id"):
+            raise HTTPException(status_code=403, detail="You can only read your own simulation.")
+    path = os.path.join(SIM_RUNS_DIR, f"{run_id}_figure.json")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Figure is not ready.")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+@app.get("/api/sim/runs/{run_id}/csv")
+def get_sim_csv(run_id: str, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    with _lock:
+        run = SIM_RUNS.get(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Simulation run not found.")
+        if run["user_id"] != user.get("id"):
+            raise HTTPException(status_code=403, detail="You can only read your own simulation.")
+    path = os.path.join(SIM_RUNS_DIR, f"{run_id}.csv")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="CSV is not ready.")
+    return FileResponse(path, media_type="text/csv", filename="sim_result.csv")
+
+
+@app.get("/api/sim/route")
+def get_sim_route():
+    route = None
+    try:
+        import base64
+        import pandas as pd
+
+        route_path = os.path.join(PROJECT_ROOT, "2027 BWSC TRACK.csv")
+        route_df = pd.read_csv(route_path)
+        image_path = os.path.join(PROJECT_ROOT, "assets", "australia_silhouette.png")
+        image_data = None
+        if os.path.exists(image_path):
+            with open(image_path, "rb") as f:
+                image_data = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+        route = {
+            "lon": route_df["lon"].iloc[::5].tolist(),
+            "lat": route_df["lat"].iloc[::5].tolist(),
+            "bounds": {
+                "minx": 113.18476562500001,
+                "miny": -39.1455078125,
+                "maxx": 153.61689453125,
+                "maxy": -10.707324218750003,
+            },
+            "bg_image": image_data,
+        }
+    except Exception:
+        logger.exception("route metadata load failed")
+        raise HTTPException(status_code=500, detail="Route metadata failed to load.")
+    return route
+
+
+@app.get("/api/sim/default-config")
+def get_default_sim_config():
+    try:
+        from Configs.Vehicle_Params import build_default_cfg
+        from mpc.mpc_controller import mpc_default_params
+
+        return {"cfg": cfg_to_jsonable(build_default_cfg()), "params": mpc_default_params}
+    except Exception:
+        logger.exception("default config load failed")
+        raise HTTPException(status_code=500, detail="Default config failed to load.")
 
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")

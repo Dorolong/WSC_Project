@@ -25,18 +25,17 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 
 ## 1. 시스템 구조
 
-두 가지를 나란히 둡니다 — **지금 돌아가는 구조**와 **바뀔 구조**입니다.
+두 가지를 나란히 둡니다 — **기존 Streamlit 구조**와 **새 HTML/FastAPI 구조**입니다.
 
 > ⚠️ **전환 계획 진행 중**
-> Streamlit Cloud를 접고 오라클 서버 하나로 통합하는 작업이 계획돼 있습니다
-> (**Phase 0·1 완료**, Phase 2~6 남음). 상세:
+> Streamlit Cloud를 접고 오라클 서버 하나로 통합하는 작업이 진행 중입니다
+> (**Phase 0~6 구현 완료, 서버 실배포 최종 확인 전**). 상세:
 > [`progress/43`](progress/43_웹통합_HTML전환_계획.txt) ·
 > 실행 지시서: [`docs/codex_web_migration_tasks.txt`](docs/codex_web_migration_tasks.txt)
 >
-> **Phase 6이 완료되면 아래 「1-1. 현재 구조」 절을 통째로 삭제하고,
-> 「1-2. 변경 예정 구조」를 정식 구조로 승격시킬 것.**
+> `app.py` 삭제와 Streamlit Cloud 중단은 사용자 최종 확인 후 진행합니다.
 
-### 1-1. 현재 구조 〔Phase 6 완료 시 이 절 삭제 예정〕
+### 1-1. 기존 Streamlit 구조 〔legacy 보관〕
 
 지금 실제로 돌아가는 구조입니다. **앱 2개 + 공용 계산 엔진**으로 구성되고,
 두 앱은 같은 Supabase 프로젝트를 공유해서 계정과 결과가 이어집니다.
@@ -74,10 +73,11 @@ flowchart TB
 | 웹 앱 | [`app.py`](app.py) | Streamlit UI, 로그인, 결과 저장/조회 |
 | 탐색 서버 | [`server/`](server/) | FastAPI 런처 + 별도 프로세스 탐색 실행 |
 
-### 1-2. 변경 예정 구조 〔Phase 6 완료 후 이 절이 정식 구조〕
+### 1-2. 새 HTML/FastAPI 구조
 
-**아직 구현되지 않았습니다.** 오라클 서버 하나가 프론트와 API를 모두 서빙하고,
-Streamlit은 사라집니다. 프론트와 API가 **같은 도메인**이라 CORS가 필요 없습니다.
+오라클 서버 하나가 프론트와 API를 모두 서빙합니다. 프론트와 API가
+**같은 도메인**이라 CORS가 필요 없습니다. 기존 Streamlit 앱은 최종 중단/삭제
+확정 전까지 legacy로 보관합니다.
 
 ```mermaid
 flowchart TB
@@ -203,7 +203,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 | 2 | Rule-based MPC (LV1~LV5 ramp + LV8 페이스 블렌딩) | **완료** |
 | 3 | Streamlit 시뮬레이터 UI | **완료** |
 | 4 | 웹 배포 (Streamlit Cloud + Supabase + Optuna 런처) | **완료**(런처 실기동 검증 전) |
-| 4-1 | 웹 통합 / HTML 전환 (`progress/43`) | **진행 중** — Phase 0·1 완료 / 2~6 남음 |
+| 4-1 | 웹 통합 / HTML 전환 (`progress/43`) | **구현 완료** — Phase 0~6 완료, 서버 실배포 확인 전 |
 | 5 | MPC 물리 building block (코스팅/제동/내리막 캡) | **진행 중** |
 | 6 | 비용함수 기반 MPC로 전환 | 설계 논의만 완료 |
 | 7 | AI 예측 모델 (발전량 / 소비전력) — `ai_models/` | 미착수 |

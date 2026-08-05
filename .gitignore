@@ -21,3 +21,4 @@ outputs/optuna_study.db-wal
 outputs/trial_*/
 outputs/terrain_*.png
 outputs/logs/
+outputs/sim_runs/

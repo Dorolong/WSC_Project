@@ -1,0 +1,20 @@
+[
+  {
+    "version": "1.0.9",
+    "date": "2026-08-05",
+    "title": "Web migration phase 1",
+    "details": [
+      "Moved login to the body gate in Streamlit.",
+      "Split the Optuna launcher into static HTML, CSS, and JavaScript modules."
+    ]
+  },
+  {
+    "version": "1.0.8",
+    "date": "2026-08-03",
+    "title": "Remote Optuna launcher",
+    "details": [
+      "Added the shared Optuna server launcher flow.",
+      "Added account-based Optuna run history."
+    ]
+  }
+]

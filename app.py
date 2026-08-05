@@ -6,7 +6,6 @@ import os
 import sys
 import time
 import base64
-import dataclasses
 import requests
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -22,6 +21,7 @@ from supabase import create_client
 from Functions.Vehicle_Function import read_path, run_simulation
 from mpc.mpc_controller import mpc_default_params
 from Configs.Vehicle_Params import *
+from shared.cfg_serde import cfg_from_jsonable, cfg_to_jsonable
 
 # Optuna 탐색을 돌리는 오라클 서버 주소. IP가 바뀌면(인스턴스 재생성 등)
 # 여기만 고치면 돼요. 나중에 도메인을 연결하면 그 주소로 바꿔주세요.
@@ -72,42 +72,6 @@ if st.session_state.user is None and not st.session_state.get("auto_login_tried"
 # 쓰면 서로 영향을 안 줌.
 if "cfg" not in st.session_state:
     st.session_state.cfg = build_default_cfg()
-
-def cfg_to_jsonable(cfg):
-    """cfg(physics/solar/... 묶음, numpy 배열 포함)를 Supabase(jsonb)에 저장 가능한 dict로 변환.
-    dataclasses.asdict()는 선언된 필드만 뽑아내서 __post_init__이 계산한 파생값
-    (HV_Energy, v_max 등)은 자동으로 빠짐 - 복원 시 __post_init__()을 다시 불러
-    재계산하면 되므로 저장할 필요 없음."""
-    def convert(o):
-        if isinstance(o, dict):
-            return {k: convert(v) for k, v in o.items()}
-        if isinstance(o, np.ndarray):
-            return o.tolist()
-        return o
-    return {
-        name: convert(dataclasses.asdict(getattr(cfg, name)))
-        for name in ("physics", "solar", "cell", "pack", "power", "drive", "race", "simpara")
-    }
-
-def cfg_from_jsonable(data):
-    """cfg_to_jsonable()의 역변환. build_default_cfg()를 베이스로 저장된 값만
-    덮어써서, 나중에 필드가 추가돼도(예: 새 차량 제원 항목) 저장 당시엔 없던
-    필드는 기본값으로 안전하게 채워짐."""
-    cfg = build_default_cfg()
-    for name in ("physics", "solar", "power", "drive", "race", "simpara"):
-        obj = getattr(cfg, name)
-        for k, v in data.get(name, {}).items():
-            if hasattr(obj, k):
-                setattr(obj, k, v)
-    for k, v in data.get("cell", {}).items():
-        if hasattr(cfg.cell, k):
-            setattr(cfg.cell, k, np.array(v) if k in ("ocv_soc", "ocv_V") else v)
-    for k in ("HV_S", "HV_P", "LV_S", "LV_P"):
-        if k in data.get("pack", {}):
-            setattr(cfg.pack, k, data["pack"][k])
-    cfg.pack.__post_init__()   # 파생값 재계산 (HV_Energy 등)
-    cfg.drive.__post_init__()  # 파생값 재계산 (v_max)
-    return cfg
 
 try:
     study = optuna.load_study(

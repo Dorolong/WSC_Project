@@ -6,6 +6,7 @@ let supabaseClient = null;
 let userEmail = null;
 let statusTimer = null;
 let myRunTimer = null;
+const authenticatedCallbacks = [];
 
 const SAVED_EMAIL_KEY = "wscOptunaSavedEmail";
 
@@ -14,6 +15,17 @@ async function getClient() {
   const mod = await import("https://esm.sh/@supabase/supabase-js@2");
   supabaseClient = mod.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   return supabaseClient;
+}
+
+export async function getSupabaseClient() {
+  return getClient();
+}
+
+export async function getCurrentUser() {
+  const client = await getClient();
+  const { data, error } = await client.auth.getUser();
+  if (error) throw error;
+  return data.user;
 }
 
 function showGate() {
@@ -33,6 +45,7 @@ function showApp() {
   resumeMyRun();
   if (myRunTimer) clearInterval(myRunTimer);
   myRunTimer = setInterval(resumeMyRun, 3000);
+  authenticatedCallbacks.forEach((callback) => callback());
 }
 
 export async function tryAutoLogin() {
@@ -93,4 +106,8 @@ export function initAuth() {
   document.getElementById("loginBtn").addEventListener("click", login);
   document.getElementById("logoutBtn").addEventListener("click", logout);
   tryAutoLogin();
+}
+
+export function onAuthenticated(callback) {
+  authenticatedCallbacks.push(callback);
 }
