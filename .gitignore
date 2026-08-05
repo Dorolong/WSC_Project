@@ -10,3 +10,10 @@ RemoteSystemsTempFiles/
 *.jar
 docker/splunk/etc.tar
 docker/splunk/var.tar
+
+# 편집기 / 도구 설정 (개인 환경 — 공유 대상 아님)
+.vscode/
+.kiro/
+
+# Node 의존성 (tools/gemini-mcp 등)
+node_modules/

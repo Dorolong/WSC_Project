@@ -3,56 +3,473 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
-		<title></title>
+		<title>KUST 텔레메트리 대시보드</title>
 		<meta name="description" content="" />
 		<meta name="viewport" content="width=device-width" />
-		
+
 		<link rel="stylesheet" th:href="@{/css/bootstrap.min.css}" />
-		<style>
-		body {
-			padding-top: 20px;
-			padding-bottom: 20px;
-		}
-		</style>
 		<link rel="stylesheet" th:href="@{/css/bootstrap-responsive.min.css}" />
 		<link rel="stylesheet" th:href="@{/css/bootstrap-switch.css}" />
 		<link rel="stylesheet" th:href="@{/css/main.css}" />
-		
+
+		<style>
+			:root {
+				/* 대시보드 전체 톤 — 사이트 기본과 같은 화이트 톤 */
+				--f1-bg: #f5f6f8; --f1-panel: #ffffff; --f1-panel2: #f2f4f7; --f1-line: #e2e6ec;
+				--f1-text: #202632; --f1-muted: #6b7684; --f1-cyan: #0f8fae; --f1-amber: #c9791a; --f1-red: #d9433d; --f1-green: #1f9d55;
+				/* 지도 패널만 별도 톤(첨부 이미지 스타일: 다크 네이비 + 그린 랜드매스 + 앰버 노선) */
+				--map-bg: #0b0f16; --map-land: #1f3b30; --map-route-done: #ffb020; --map-route-todo: rgba(245,185,66,.32); --map-marker: #33c9ea;
+			}
+			/* 고정 네비바(약 42px) 바로 아래에서 시작하도록 — main.css의 60px보다 타이트하게 */
+			body { padding-top: 48px; padding-bottom: 5px; background: #f5f6f8; }
+
+			/* ===== 단일 차량 히어로 대시보드 ===== */
+			.f1-dash { background: var(--f1-bg); color: var(--f1-text); font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; padding: 6px 22px 4px; margin-bottom: 18px; }
+
+			.f1-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+			.f1-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+			.f1-pill.live { background: rgba(31,157,85,.12); color: var(--f1-green); }
+			.f1-pill.live .dot { animation: f1-pulse 1.4s infinite; }
+			.f1-pill.stale { background: rgba(201,121,26,.12); color: var(--f1-amber); }
+			.f1-pill.dead { background: rgba(217,67,61,.12); color: var(--f1-red); }
+			@keyframes f1-pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+			.f1-grid { display: grid; grid-template-columns: 260px 1fr 280px; gap: 16px; }
+			@media (max-width: 980px) { .f1-grid { grid-template-columns: 1fr; } }
+			/* 데이터 패널이 중앙(넓은 1fr)에, 지도 패널이 우측(좁은 280px)에 오도록 auto-placement 순서만 바꾼다 —
+			   DOM 순서/내용은 그대로 두고 시각적 위치만 스왑 */
+			.f1-panel-data { order: 2; }
+			.f1-panel-map { order: 3; }
+			.f1-panel { background: var(--f1-panel); border: 1px solid var(--f1-line); border-radius: 10px; padding: 14px; box-shadow: 0 1px 2px rgba(20,20,30,.03); }
+			.f1-label { font-size: 10px; letter-spacing: .08em; color: var(--f1-muted); text-transform: uppercase; margin-bottom: 6px; }
+			.f1-panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+
+			/* 좌측: 차량 패널 */
+			.f1-car-name { font-size: 20px; font-weight: 800; letter-spacing: .02em; }
+			.f1-car-chip { display: inline-block; background: var(--f1-cyan); color: #fff; font-weight: 800; font-size: 12px; padding: 2px 8px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+
+			/* 드라이버 선택 */
+			.f1-driver-btns { display: flex; gap: 6px; }
+			.f1-driver-btn { flex: 1; padding: 9px 4px; border: 1px solid var(--f1-line); background: var(--f1-panel2); border-radius: 6px; font-size: 12px; font-weight: 700; color: var(--f1-muted); cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
+			.f1-driver-btn:hover { border-color: var(--f1-cyan); color: var(--f1-text); }
+			.f1-driver-btn:focus-visible { outline: 2px solid var(--f1-cyan); outline-offset: 1px; }
+			.f1-driver-btn.active { background: var(--f1-cyan); border-color: var(--f1-cyan); color: #fff; }
+			.f1-photo-slot {
+				margin-top: 10px; height: 120px; border: 1px dashed #cfd5dd; border-radius: 8px;
+				display: flex; align-items: center; justify-content: center; text-align: center;
+				color: var(--f1-muted); font-size: 11px; line-height: 1.5; padding: 8px; background: var(--f1-panel2);
+			}
+			.f1-photo-slot img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+			.f1-status-badge { margin-top: 10px; padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; text-align: center; }
+			.f1-status-badge.ok { background: rgba(31,157,85,.1); color: var(--f1-green); }
+			.f1-status-badge.warn { background: rgba(201,121,26,.1); color: var(--f1-amber); }
+			.f1-status-badge.alert { background: rgba(217,67,61,.1); color: var(--f1-red); }
+
+			/* SOC 배터리 바 — BOT/TOP 둘 다 표시 */
+			.f1-battery-wrap { margin-top: 14px; }
+			.f1-batt-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+			.f1-batt-row:first-child { margin-top: 0; }
+			.f1-batt-row .tag { width: 28px; font-size: 10px; font-weight: 800; color: var(--f1-muted); flex: none; }
+			.f1-batt-row .f1-battery-body { flex: 1; height: 18px; border: 2px solid #38404c; border-radius: 4px; padding: 2px; background: var(--f1-panel2); }
+			.f1-battery-fill { height: 100%; border-radius: 2px; width: 0%; background: var(--f1-green); transition: width .5s, background-color .5s; }
+			.f1-batt-row .pct { width: 48px; text-align: right; font-weight: 800; font-size: 14px; flex: none; }
+			.f1-batt-row .pct .u { font-size: 10px; color: var(--f1-muted); font-weight: 600; }
+			.f1-battery-sub { font-size: 10px; color: var(--f1-muted); text-align: center; margin-top: 8px; }
+
+			.f1-latlong { display: flex; justify-content: space-between; margin-top: 14px; font-size: 11px; color: var(--f1-muted); }
+			.f1-latlong b { color: var(--f1-text); font-weight: 700; display: block; font-size: 13px; }
+			.f1-progress-wrap { margin-top: 12px; }
+			.f1-progress-wrap .hd { display: flex; justify-content: space-between; font-size: 11px; color: var(--f1-muted); margin-bottom: 4px; }
+			.f1-progress-bar { height: 8px; border-radius: 4px; background: var(--f1-panel2); overflow: hidden; }
+			.f1-progress-bar > div { height: 100%; background: linear-gradient(90deg, var(--f1-cyan), var(--f1-green)); width: 0%; transition: width .5s; }
+
+			/* 중앙: 경로 지도 + 속도 */
+			.f1-map-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+			.f1-map-title .t { font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+			.f1-map-title .sub { font-size: 10px; color: var(--f1-muted); }
+			.f1-map-box { position: relative; background: var(--map-bg); border-radius: 8px; overflow: hidden; }
+			.f1-map-note { padding: 6px 10px; font-size: 10px; color: #8b95a3; text-align: center; background: var(--map-bg); }
+
+			.f1-speed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 14px; }
+			.f1-speed-big { text-align: center; flex: none; }
+			.f1-speed-big .num { font-size: 46px; font-weight: 800; line-height: 1; color: var(--f1-cyan); }
+			.f1-speed-big .unit { font-size: 12px; color: var(--f1-muted); margin-top: 2px; }
+			.f1-mini-gauges { flex: 1; display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; }
+			.f1-mini-gauge { flex: 1 1 80px; min-width: 80px; background: var(--f1-panel2); border-radius: 8px; padding: 8px 6px; text-align: center; }
+			.f1-mini-gauge .v { font-size: 20px; font-weight: 800; }
+			.f1-mini-gauge .l { font-size: 10px; color: var(--f1-muted); margin-top: 2px; }
+
+			#f1-trace-chart { height: 120px; width: 100%; margin-top: 12px; }
+
+			/* 우측: 통신/원시 데이터 */
+			.f1-kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+			.f1-kv { background: var(--f1-panel2); border-radius: 6px; padding: 7px 9px; }
+			.f1-kv .v { font-size: 15px; font-weight: 700; }
+			.f1-kv .v .u { font-size: 10px; color: var(--f1-muted); font-weight: 500; margin-left: 2px; }
+			.f1-kv .l { font-size: 9px; color: var(--f1-muted); margin-top: 1px; }
+
+			.f1-raw-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+			.f1-raw-table tr:nth-child(even) { background: var(--f1-panel2); }
+			.f1-raw-table td { padding: 8px 9px; }
+			.f1-raw-table td:first-child { color: var(--f1-muted); font-size: 11.5px; white-space: nowrap; }
+			.f1-raw-table td:first-child .ic { display: inline-block; width: 18px; text-align: center; margin-right: 4px; }
+			.f1-raw-table td:last-child { text-align: right; font-weight: 800; font-size: 14px; color: var(--f1-text); font-variant-numeric: tabular-nums; }
+			.f1-raw-table td:last-child .u { font-size: 10px; color: var(--f1-muted); font-weight: 600; margin-left: 3px; }
+			.f1-raw-table td:last-child.fault { color: var(--f1-red); }
+
+			.f1-mppt-bar-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 10px; }
+			.f1-mppt-bar-row .nm { width: 22px; color: var(--f1-muted); flex: none; }
+			.f1-mppt-bar-track { flex: 1; height: 6px; border-radius: 3px; background: var(--f1-panel2); overflow: hidden; }
+			.f1-mppt-bar-track > div { height: 100%; background: var(--f1-amber); width: 0%; }
+			.f1-mppt-bar-row .val { width: 118px; text-align: right; flex: none; color: var(--f1-muted); white-space: nowrap; }
+			.f1-mppt-bar-row .val b { color: var(--f1-text); }
+
+			.f1-eta-box { margin-top: 10px; background: var(--f1-panel2); border-radius: 8px; padding: 10px; text-align: center; }
+			.f1-eta-box .v { font-size: 18px; font-weight: 800; color: var(--f1-cyan); }
+			.f1-eta-box .l { font-size: 10px; color: var(--f1-muted); margin-top: 2px; }
+
+			/* 중앙 패널 하단: MPPT 바 / 링크·ETA 2단 배치 (중앙이 넓어져서 옆으로 붙임) */
+			.f1-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 14px; }
+			@media (max-width: 620px) { .f1-two-col { grid-template-columns: 1fr; } }
+
+			/* 하단: 전체 경로 타임라인 */
+			.f1-timeline { margin-top: 16px; background: var(--f1-panel); border: 1px solid var(--f1-line); border-radius: 10px; padding: 14px 40px 10px; }
+			.f1-timeline-track { position: relative; height: 6px; border-radius: 3px; background: var(--f1-panel2); margin: 20px 0 8px; }
+			.f1-timeline-track .fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--f1-cyan), var(--f1-green)); width: 0%; }
+			.f1-timeline-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 12px; height: 12px; border-radius: 50%; background: var(--f1-cyan); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--f1-line); z-index: 2; }
+			.f1-timeline-city { position: absolute; top: -14px; transform: translateX(-50%); font-size: 9px; color: var(--f1-muted); white-space: nowrap; }
+			/* 도시 간격이 좁은 구간(포트오거스타 90%/애들레이드 100%)에서 라벨이 겹치지 않도록 짝/홀 단으로 높이를 어긋나게 배치 */
+			.f1-timeline-city:nth-child(even) { top: -14px; }
+			.f1-timeline-city:nth-child(odd) { top: -27px; }
+			/* DOM 순서: .fill(1) → 도시 라벨 7개(2~8) → 마커(9, last) — 양끝 도시 라벨만 안쪽으로 정렬해 컨테이너 밖으로 잘리지 않게 함 */
+			.f1-timeline-city:nth-child(2) { transform: translateX(0); }
+			.f1-timeline-city:nth-child(2) .tick { margin: 0 0 2px; }
+			.f1-timeline-city:nth-last-child(2) { transform: translateX(-100%); }
+			.f1-timeline-city:nth-last-child(2) .tick { margin: 0 0 2px auto; }
+			.f1-timeline-city .tick { width: 2px; height: 6px; background: #c7cdd6; margin: 0 auto 2px; }
+		</style>
+
 		<script th:src="@{/js/vendor/modernizr-2.6.2-respond-1.1.0.min.js}"></script>
 	</head>
 	<body>
 		<div th:replace="header :: menu"></div>
-	
+
+		<div class="f1-dash">
+
+			<div class="f1-grid">
+
+				<!-- 좌: 차량 패널 -->
+				<div class="f1-panel">
+					<div class="f1-label" style="margin-bottom:6px;">현재 드라이버</div>
+					<div class="f1-driver-btns" id="f1-driver-btns">
+						<button type="button" class="f1-driver-btn" data-driver="1">드라이버 1</button>
+						<button type="button" class="f1-driver-btn" data-driver="2">드라이버 2</button>
+						<button type="button" class="f1-driver-btn" data-driver="3">드라이버 3</button>
+					</div>
+
+					<!-- 차량 이미지 자리 — src를 나중에 채워 넣으면 됨 (id="f1-vehicle-photo") -->
+					<div class="f1-photo-slot" id="f1-photo-slot">
+						차량 이미지<br/>(추후 추가 예정)
+						<img id="f1-vehicle-photo" style="display:none;" alt="ARROW1" />
+					</div>
+
+					<div class="f1-status-badge ok" id="f1-status-badge">정상 주행</div>
+
+					<div class="f1-battery-wrap">
+						<div class="f1-batt-row">
+							<span class="tag">BOT</span>
+							<div class="f1-battery-body"><div class="f1-battery-fill" id="f1-batt-fill-bot"></div></div>
+							<span class="pct"><span id="f1-batt-pct-bot">0</span><span class="u">%</span></span>
+						</div>
+						<div class="f1-batt-row">
+							<span class="tag">TOP</span>
+							<div class="f1-battery-body"><div class="f1-battery-fill" id="f1-batt-fill-top"></div></div>
+							<span class="pct"><span id="f1-batt-pct-top">0</span><span class="u">%</span></span>
+						</div>
+						<div class="f1-battery-sub">배터리 SOC (BOT / TOP)</div>
+					</div>
+
+					<div class="f1-latlong">
+						<div>위도<b id="f1-lat">-</b></div>
+						<div style="text-align:right;">경도<b id="f1-lon">-</b></div>
+					</div>
+					<div style="font-size:9px; color:var(--f1-muted); text-align:right; margin-top:2px;">GPS 연동 예정</div>
+
+					<div class="f1-progress-wrap">
+						<div class="hd"><span>주행거리</span><span id="f1-dist-label">0 / 3,000+ km</span></div>
+						<div class="f1-progress-bar"><div id="f1-dist-bar"></div></div>
+					</div>
+				</div>
+
+				<!-- 지도 패널 (시각적으로는 우측에 배치됨 — CSS order 참고) -->
+				<div class="f1-panel f1-panel-map">
+					<div class="f1-map-title">
+						<span class="t">2027 BWSC ROUTE</span>
+						<span class="sub">Darwin → Adelaide · 약 3,000km+</span>
+					</div>
+					<div class="f1-map-box">
+						<!-- 실제 호주 대륙 윤곽(SVG, mapsicon 오픈소스 트레이스) 위에 노선 표시.
+						     좌표는 다윈/애들레이드 등 실좌표 기준으로 눈대중 보정한 값 — 정밀 지리 좌표는 아님.
+						     #f1-route-marker/#f1-route-done은 GPS 연동 후 실좌표로 갱신하면 됨. -->
+						<!-- viewBox는 대륙 전체(0~1024 정사각)를 그대로 담는다. 폭을 좁게 크롭하면 서/동부가 잘리므로
+					     크기 조절은 크롭이 아니라 표시 크기(width/aspect-ratio)로만 한다. -->
+					<svg viewBox="-40 -40 1104 1104" style="width:100%; max-width:300px; height:auto; aspect-ratio:1/1; display:block; margin:0 auto;" preserveAspectRatio="xMidYMid meet">
+							<g fill="var(--map-land)">
+								<g transform="translate(0.000000,1024.000000) scale(0.100000,-0.100000)" stroke="none">
+									<path d="M7380 9882 c0 -13 -14 -24 -41 -35 -34 -13 -40 -20 -34 -36 3 -11 1
+-58 -6 -103 -8 -61 -17 -90 -34 -108 -36 -39 -85 -125 -85 -149 0 -13 6 -21
+18 -21 20 -1 57 -26 45 -31 -5 -2 -23 -23 -41 -46 -33 -43 -34 -43 -19 -85 13
+-40 12 -45 -6 -70 -29 -40 -39 -120 -21 -164 10 -24 15 -64 13 -118 -1 -44 4
+-94 10 -110 10 -24 7 -40 -14 -103 -17 -50 -25 -97 -25 -141 0 -90 -31 -175
+-86 -232 -32 -33 -45 -56 -50 -88 -10 -61 -55 -127 -105 -153 -56 -28 -115
+-20 -189 24 -30 19 -69 39 -86 46 -20 8 -36 25 -47 50 -25 56 -116 111 -182
+111 -55 0 -82 16 -158 93 -86 87 -181 148 -244 155 -34 4 -46 10 -53 27 -5 14
+-20 25 -39 28 -22 5 -36 16 -47 40 -12 26 -35 43 -110 81 -52 26 -99 56 -104
+66 -15 28 4 74 80 190 71 110 88 157 51 145 -31 -9 -45 26 -28 68 15 36 46 60
+90 71 24 6 27 4 27 -19 0 -37 27 -31 36 8 4 17 7 40 5 50 -1 9 11 34 27 55 16
+20 39 56 51 79 21 42 21 42 2 53 -11 5 -27 10 -36 10 -9 0 -31 11 -49 25 l-32
+24 -33 -20 c-32 -19 -32 -21 -16 -39 19 -21 14 -50 -8 -50 -16 0 -41 26 -50
+52 -5 15 -11 16 -32 8 -39 -15 -47 -13 -35 9 5 11 10 23 10 26 0 14 -86 -8
+-102 -26 -21 -25 -46 -24 -75 3 -18 17 -41 23 -101 28 -49 4 -107 18 -160 38
+-59 23 -100 32 -142 32 -35 0 -63 5 -69 13 -6 6 -22 27 -37 45 -33 41 -79 44
+-115 6 -23 -25 -23 -26 -6 -55 9 -17 17 -41 17 -55 0 -35 -63 -73 -141 -84
+-107 -16 -136 -13 -161 15 -24 28 -44 31 -83 13 -16 -7 -25 -19 -25 -34 0 -17
+-4 -21 -20 -17 -11 3 -36 2 -55 -1 -34 -7 -35 -9 -35 -51 0 -40 -2 -44 -30
+-50 -17 -4 -30 -11 -30 -15 0 -5 -10 -18 -22 -30 -21 -19 -21 -21 -4 -56 9
+-20 16 -37 14 -39 -37 -26 -56 -35 -73 -35 -16 0 -27 -13 -45 -56 -12 -31 -38
+-76 -56 -100 -42 -55 -43 -89 -4 -134 33 -39 38 -60 14 -60 -16 0 -15 -19 3
+-67 7 -17 6 -17 -22 1 -17 10 -42 30 -57 44 l-28 26 0 -28 c0 -23 -3 -26 -14
+-17 -21 17 -117 44 -151 42 -33 -2 -75 -36 -75 -61 0 -17 -18 -40 -32 -40 -4
+0 1 24 12 53 l21 52 -113 107 c-72 69 -125 111 -147 117 -19 6 -44 20 -57 32
+-32 30 -65 18 -58 -20 5 -22 1 -31 -20 -44 -32 -22 -36 -21 -36 3 0 33 -48 27
+-61 -7 -8 -19 -13 -23 -16 -13 -3 8 -6 21 -9 28 -3 10 -9 10 -24 2 -16 -9 -19
+-15 -11 -24 8 -10 7 -17 -4 -26 -9 -7 -13 -21 -9 -34 2 -11 -1 -29 -9 -39 -12
+-18 -15 -17 -45 17 -17 20 -33 36 -36 36 -2 0 -7 -15 -10 -33 -5 -29 -12 -36
+-46 -46 -27 -8 -45 -21 -54 -40 -13 -25 -13 -30 4 -47 10 -10 21 -29 25 -42 6
+-20 4 -21 -20 -12 -55 21 -105 0 -105 -43 0 -9 -5 -17 -11 -17 -6 0 -33 -10
+-61 -22 l-50 -22 6 -80 c4 -53 3 -93 -5 -116 -16 -46 -14 -45 -45 -21 -32 25
+-52 27 -61 5 -5 -13 -9 -12 -28 6 -18 17 -30 20 -54 15 -32 -7 -39 -19 -20
+-31 6 -4 8 -20 4 -40 -5 -30 -1 -40 29 -76 37 -43 46 -68 23 -68 -8 0 -24 -11
+-37 -25 -17 -18 -21 -31 -17 -55 4 -16 5 -30 3 -30 -8 0 -104 158 -129 214
+-16 35 -31 56 -36 50 -5 -5 -25 -29 -45 -53 -20 -24 -53 -56 -74 -71 -59 -43
+-84 -134 -65 -243 4 -26 10 -36 19 -33 8 3 18 -3 24 -13 8 -16 -4 -29 -87 -92
+-93 -72 -96 -76 -127 -152 -41 -99 -82 -140 -212 -210 -117 -64 -174 -78 -299
+-75 -100 2 -172 -20 -160 -50 8 -22 -13 -32 -68 -32 -58 0 -102 -17 -162 -64
+-62 -47 -130 -57 -180 -26 -32 20 -36 20 -57 6 -30 -21 -38 -20 -38 7 -1 20
+-4 19 -35 -15 -24 -25 -49 -41 -77 -47 -27 -6 -56 -24 -87 -54 -101 -97 -187
+-157 -262 -182 -92 -32 -119 -57 -149 -145 -20 -58 -28 -70 -46 -70 -17 0 -23
+8 -28 41 -4 22 -4 63 0 90 6 47 6 49 -18 49 -22 0 -30 -11 -62 -80 -49 -108
+-51 -125 -27 -188 18 -45 20 -66 15 -135 -6 -77 -9 -86 -55 -154 -34 -50 -49
+-81 -49 -105 0 -91 118 -353 211 -467 26 -32 27 -35 14 -71 -8 -21 -20 -50
+-27 -64 l-13 -26 -24 51 c-19 39 -29 49 -43 46 -14 -4 -18 1 -18 19 0 32 -26
+84 -54 106 -29 24 -36 22 -36 -9 0 -57 20 -102 61 -137 36 -30 40 -38 37 -72
+-5 -64 -32 -57 -69 19 -34 69 -69 103 -69 68 0 -11 -6 -21 -12 -24 -10 -4 -10
+-7 -1 -18 7 -7 13 -21 13 -31 0 -11 21 -45 48 -76 26 -32 72 -95 102 -142 53
+-81 55 -87 66 -182 11 -99 11 -99 57 -146 48 -50 79 -122 51 -122 -21 0 -18
+-6 42 -83 l56 -72 -6 -113 c-5 -110 -5 -115 34 -241 28 -89 59 -162 101 -237
+68 -123 78 -170 61 -319 -7 -69 -10 -76 -19 -55 -8 18 -10 -12 -9 -120 1 -158
+-11 -220 -44 -220 -9 0 -37 7 -60 15 -23 8 -45 15 -48 15 -5 0 6 -166 14 -210
+5 -24 12 -29 51 -35 54 -8 122 -54 176 -119 21 -25 43 -46 48 -46 6 0 43 -14
+82 -31 65 -29 78 -31 143 -26 40 3 91 1 115 -4 26 -6 46 -6 52 0 5 5 21 6 40
+0 20 -5 35 -5 41 1 6 6 23 10 38 10 16 0 31 7 34 15 4 9 19 15 35 15 26 0 28
+2 19 19 -16 30 -13 38 21 52 18 7 45 24 62 38 22 19 43 26 76 27 64 2 124 32
+117 58 -3 11 3 28 14 40 11 12 28 32 38 46 19 23 21 24 71 12 75 -17 115 -15
+144 8 18 14 40 20 79 20 30 0 59 5 66 12 9 9 28 8 82 -1 39 -7 87 -10 106 -7
+26 5 36 3 41 -9 4 -12 12 -15 27 -10 11 4 66 9 121 11 82 4 102 2 111 -11 9
+-12 17 -13 38 -5 15 5 37 10 50 10 41 0 102 64 130 138 40 104 57 126 112 146
+27 9 65 25 84 36 78 43 195 100 204 100 6 0 22 16 36 35 38 53 78 62 187 38
+l89 -19 170 46 c121 33 197 61 270 97 l100 51 105 1 c66 0 122 6 154 16 38 11
+72 14 141 9 76 -5 96 -4 115 10 13 9 43 16 67 16 38 0 52 -7 115 -58 120 -97
+119 -97 189 -77 l59 16 70 -44 69 -45 50 16 50 16 31 -30 c25 -24 30 -35 27
+-66 -2 -21 -2 -38 1 -38 2 0 19 9 37 21 26 16 35 18 38 7 2 -7 9 -28 15 -47
+10 -31 9 -33 -10 -28 -19 5 -21 3 -15 -25 3 -17 6 -37 6 -44 0 -7 41 -46 91
+-86 73 -59 90 -77 86 -95 -3 -16 11 -36 55 -80 50 -50 58 -62 53 -85 -4 -17
+-1 -36 9 -50 9 -12 16 -38 16 -56 0 -29 -3 -34 -20 -29 -25 6 -19 -4 42 -74
+44 -49 49 -52 75 -43 25 9 28 14 28 58 0 53 26 86 52 65 10 -9 15 -6 22 12 42
+111 80 152 186 199 65 29 81 41 84 60 1 14 18 42 37 62 19 21 34 47 34 57 0
+11 5 23 11 26 6 4 23 25 39 47 23 31 27 46 23 74 -4 21 -2 34 5 34 16 0 34
+-38 27 -59 -3 -10 1 -34 10 -54 19 -45 19 -44 -5 -50 -22 -6 -24 -19 -10 -87
+l8 -45 -53 -53 -54 -54 -13 -141 c-11 -112 -16 -141 -27 -139 -8 2 -31 0 -51
+-3 -29 -5 -40 -13 -53 -41 -26 -55 -23 -67 16 -58 17 5 65 7 105 6 l72 -3 0
+27 c0 15 11 42 25 60 18 23 27 51 32 93 3 34 9 61 13 61 4 0 11 16 14 35 4 19
+11 35 16 35 20 0 74 -117 91 -198 l17 -85 -33 -46 c-45 -64 -68 -111 -54 -111
+6 0 24 -14 39 -30 26 -28 30 -29 44 -14 9 8 16 24 16 35 0 29 26 34 84 16 64
+-21 118 -75 176 -177 35 -62 43 -87 48 -142 3 -42 0 -79 -8 -97 -11 -28 -9
+-36 30 -108 39 -73 142 -220 164 -235 6 -4 40 -15 76 -24 77 -21 150 -66 150
+-94 0 -31 48 -27 60 5 8 21 14 24 42 18 18 -3 46 -15 62 -26 20 -14 42 -20 71
+-18 36 1 46 -3 67 -27 18 -22 37 -31 73 -36 34 -6 54 -15 67 -32 11 -13 26
+-24 35 -24 8 0 28 -8 44 -17 30 -18 36 -16 51 18 8 17 197 151 223 157 36 10
+50 52 17 52 -10 0 -22 3 -25 7 -11 10 65 52 94 53 23 0 28 -6 37 -40 l10 -40
+-45 -32 c-50 -34 -50 -34 34 -63 57 -20 70 -17 54 13 -16 30 -3 62 25 62 29 0
+40 -21 26 -47 -15 -26 9 -64 57 -91 23 -13 41 -28 41 -34 0 -6 7 -20 16 -29
+13 -14 21 -16 35 -8 21 11 39 5 39 -14 0 -7 9 -23 20 -37 20 -24 21 -25 35 -6
+8 11 15 34 15 51 0 44 21 68 92 108 35 20 116 83 181 140 117 103 120 104 179
+111 86 9 188 8 223 -3 52 -14 144 30 183 88 36 52 42 96 24 176 -10 45 -9 52
+8 65 15 12 23 41 35 140 17 141 54 254 109 329 39 54 56 100 56 151 0 55 25
+116 67 164 37 42 63 109 63 161 0 13 26 71 58 129 44 80 69 113 109 144 60 48
+183 214 183 249 0 13 11 33 25 45 18 16 25 32 25 58 0 20 4 40 9 45 16 17 42
+178 31 189 -15 15 -11 88 5 110 8 11 15 30 15 43 0 12 14 65 30 116 18 56 30
+116 30 147 0 64 12 105 51 183 17 31 25 57 19 57 -5 0 -10 15 -10 33 0 49 -59
+257 -81 285 -10 14 -19 29 -19 34 0 5 -10 18 -22 28 -19 15 -21 21 -10 31 15
+16 18 384 3 374 -9 -5 -31 52 -31 80 0 6 -5 27 -11 48 -7 27 -15 37 -30 37
+-12 0 -34 9 -50 20 -24 18 -29 30 -35 80 -5 47 -10 60 -23 60 -25 0 -97 80
+-111 122 -14 44 -56 81 -84 74 -23 -6 -120 65 -164 122 -29 36 -31 44 -38 163
+-5 105 -10 127 -27 147 -27 29 -37 28 -37 -3 0 -14 -3 -25 -6 -25 -21 0 -73
+45 -92 79 -17 30 -27 38 -42 34 -16 -4 -20 -14 -20 -51 l0 -46 -55 54 c-53 53
+-55 56 -55 110 0 60 -22 133 -48 165 -10 11 -26 38 -37 59 -11 21 -41 57 -67
+80 -54 46 -64 76 -23 68 14 -2 25 -1 25 2 0 15 -41 86 -49 86 -5 0 -23 12 -40
+26 -24 20 -31 22 -31 10 0 -26 -34 -18 -51 13 -12 20 -27 30 -53 35 -26 5 -40
+15 -48 31 -8 17 -15 22 -23 15 -8 -7 -18 4 -33 35 -20 41 -25 45 -57 45 -28 0
+-43 7 -66 32 l-29 32 0 -28 0 -28 -47 35 c-27 19 -58 37 -70 41 -33 10 -57 55
+-54 103 2 36 -3 48 -34 81 -39 44 -42 64 -25 167 9 53 7 66 -15 121 -14 34
+-25 74 -25 88 0 20 -6 25 -27 28 -20 2 -29 9 -31 24 -2 12 -14 32 -28 45 -16
+15 -24 33 -24 58 0 45 -18 143 -36 201 -8 25 -14 59 -14 77 0 17 -5 35 -11 38
+-7 5 -5 15 5 31 18 26 20 38 7 29 -5 -3 -32 17 -60 44 -27 27 -62 51 -76 55
+-14 4 -29 14 -32 24 -28 79 -32 86 -51 69 -10 -10 -27 -14 -39 -11 -16 4 -26
+-1 -38 -20 -12 -18 -26 -26 -46 -26 -33 0 -49 24 -68 103 -6 27 -18 59 -26 71
+-12 18 -13 28 -3 53 9 24 9 38 1 55 -7 13 -14 48 -16 78 -2 30 -10 56 -16 58
+-6 2 -11 17 -11 33 0 19 -11 39 -34 62 -44 45 -53 73 -30 98 22 24 8 55 -24
+52 -23 -3 -33 18 -57 117 -33 132 -35 139 -56 145 -15 5 -17 10 -10 19 14 16
+4 26 -26 26 -16 0 -23 -6 -23 -18z"/>
+									<path d="M7968 1199 l3 -122 54 -72 c56 -77 69 -99 109 -188 l25 -57 -29 15
+c-16 8 -31 15 -34 15 -2 0 15 -54 38 -120 37 -106 48 -127 93 -173 28 -29 62
+-74 76 -101 l24 -49 64 2 c35 1 78 -3 95 -8 24 -7 35 -5 45 5 8 7 32 20 54 27
+28 10 41 20 43 36 3 19 0 21 -25 15 l-28 -6 30 26 c17 14 35 25 41 26 6 0 9
+13 6 31 -3 23 1 34 17 45 11 8 21 24 21 35 0 23 4 23 35 3 23 -15 23 -16 7
+-44 -16 -28 -16 -30 8 -55 l25 -26 18 23 c15 18 18 32 13 67 -8 55 10 201 30
+259 13 34 20 42 41 42 l25 0 -7 188 -7 187 -36 38 c-20 20 -41 37 -48 37 -6 0
+-41 -13 -77 -30 -51 -23 -81 -30 -127 -30 -39 0 -69 -6 -86 -16 -14 -9 -50
+-23 -80 -30 l-55 -12 -119 54 c-110 50 -216 83 -265 84 -19 0 -20 -6 -17 -121z"/>
+								</g>
+							</g>
+
+							<!-- 노선: 남은 구간(연한 앰버, 항상 전체 표시) -->
+							<polyline points="445,90 478,148 526,296 518,414 540,568 612,668 630,695"
+								fill="none" stroke="var(--map-route-todo)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+							<!-- 노선: 주행 완료 구간(진한 앰버) — 오도미터 기준으로 JS가 갱신 -->
+							<polyline id="f1-route-done" points="445,90"
+								fill="none" stroke="var(--map-route-done)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+
+							<circle cx="445" cy="90" r="7" fill="#0b0f16" stroke="var(--map-route-done)" stroke-width="3"/>
+							<circle cx="630" cy="695" r="7" fill="#0b0f16" stroke="var(--map-route-todo)" stroke-width="3"/>
+
+							<!-- 실시간(추후 GPS) 위치 마커 — 지금은 주행거리 기준 위치 -->
+							<circle id="f1-route-marker" cx="445" cy="90" r="10" fill="var(--map-marker)" stroke="#0b0f16" stroke-width="3">
+								<title>현재 위치 (주행거리 기준 추정)</title>
+							</circle>
+						</svg>
+						<div class="f1-map-note">Stuart Hwy(다윈→포트오거스타) → Hwy 1(→애들레이드) 개략 노선. GPS 연동 시 실좌표로 갱신 예정.</div>
+					</div>
+
+					<div class="f1-panel-head" style="margin-top:14px;">
+						<div class="f1-label" style="margin-bottom:0;">통신 링크</div>
+						<span class="f1-pill dead" id="f1-link-pill"><span class="dot"></span>OFFLINE</span>
+					</div>
+					<div class="f1-kv-grid">
+						<div class="f1-kv"><div class="v" id="f1-frames">0</div><div class="l">수신 프레임</div></div>
+						<div class="f1-kv"><div class="v" id="f1-errors">0</div><div class="l">오류</div></div>
+					</div>
+
+					<div class="f1-label" style="margin-top:12px;">MPPT 출력</div>
+					<div class="f1-mppt-bar-row"><span class="nm">#1</span><div class="f1-mppt-bar-track"><div id="f1-mppt-bar-0"></div></div><span class="val" id="f1-mppt-val-0">0W</span></div>
+					<div class="f1-mppt-bar-row"><span class="nm">#2</span><div class="f1-mppt-bar-track"><div id="f1-mppt-bar-1"></div></div><span class="val" id="f1-mppt-val-1">0W</span></div>
+					<div class="f1-mppt-bar-row"><span class="nm">#3</span><div class="f1-mppt-bar-track"><div id="f1-mppt-bar-2"></div></div><span class="val" id="f1-mppt-val-2">0W</span></div>
+
+					<div class="f1-eta-box">
+						<div class="v" id="f1-eta">--:--</div>
+						<div class="l">애들레이드 도착 예상 (현재 속도 기준)</div>
+					</div>
+				</div>
+
+				<!-- 데이터 패널 (시각적으로는 중앙 넓은 컬럼에 배치됨 — CSS order 참고) -->
+				<div class="f1-panel f1-panel-data">
+					<div class="f1-label">차량 텔레메트리</div>
+
+					<div class="f1-speed-row" style="margin-top:6px;">
+						<div class="f1-speed-big">
+							<div class="num" id="f1-speed">0</div>
+							<div class="unit">km/h</div>
+						</div>
+						<div class="f1-mini-gauges">
+							<div class="f1-mini-gauge"><div class="v" id="f1-rpm">0</div><div class="l">모터 RPM</div></div>
+							<div class="f1-mini-gauge"><div class="v" id="f1-packpower">0<span style="font-size:11px;">W</span></div><div class="l">팩 전력</div></div>
+							<div class="f1-mini-gauge"><div class="v" id="f1-heatsink">0<span style="font-size:11px;">℃</span></div><div class="l">Heatsink</div></div>
+							<div class="f1-mini-gauge"><div class="v" id="f1-motortemp">0<span style="font-size:11px;">℃</span></div><div class="l">모터 온도</div></div>
+						</div>
+					</div>
+					<div id="f1-trace-chart"></div>
+					<div style="font-size:10px; color:var(--f1-muted); text-align:center; margin-top:2px;">출력 전류 추이 (A)</div>
+
+					<div class="f1-label" style="margin-top:16px;">RAW TELEMETRY DATA</div>
+					<table class="f1-raw-table">
+						<tr><td><span class="ic">⚡</span>Bus 전압</td><td id="f1-busv">-</td></tr>
+						<tr><td><span class="ic">⚡</span>Bus 전류</td><td id="f1-busi">-</td></tr>
+						<tr><td><span class="ic">🔋</span>팩 전압 (BOT)</td><td id="f1-packv">-</td></tr>
+						<tr><td><span class="ic">🔋</span>팩 전류 (BOT)</td><td id="f1-packi">-</td></tr>
+						<tr><td><span class="ic">🔋</span>팩 전압 (TOP)</td><td id="f1-packv-top">-</td></tr>
+						<tr><td><span class="ic">⚙️</span>모터 RPM</td><td id="f1-raw-rpm">-</td></tr>
+						<tr><td><span class="ic">☀️</span>MPPT 합계</td><td id="f1-mppt-total">-</td></tr>
+						<tr><td><span class="ic">🚗</span>LV 전압</td><td id="f1-lv-packv">-</td></tr>
+					</table>
+
+				</div>
+			</div>
+
+			<!-- 하단: 전체 경로 타임라인 -->
+			<div class="f1-timeline">
+				<div class="f1-label">전체 경로 진행률 (다윈 → 애들레이드, 약 3,000km+)</div>
+				<div class="f1-timeline-track" id="f1-timeline-track">
+					<div class="fill" id="f1-timeline-fill"></div>
+					<div class="f1-timeline-city" style="left:0%;"><div class="tick"></div>다윈 (0km)</div>
+					<div class="f1-timeline-city" style="left:10.5%;"><div class="tick"></div>캐서린</div>
+					<div class="f1-timeline-city" style="left:33%;"><div class="tick"></div>테넌트크릭</div>
+					<div class="f1-timeline-city" style="left:49.5%;"><div class="tick"></div>앨리스스프링스</div>
+					<div class="f1-timeline-city" style="left:74%;"><div class="tick"></div>쿠버페디</div>
+					<div class="f1-timeline-city" style="left:90%;"><div class="tick"></div>포트오거스타</div>
+					<div class="f1-timeline-city" style="left:100%;"><div class="tick"></div>애들레이드 (~3,000km)</div>
+					<div class="f1-timeline-marker" id="f1-timeline-marker" style="left:0%;"></div>
+				</div>
+			</div>
+		</div>
+
 		<div class="container">
-	
-			<!-- Example row of columns -->
+
+			<!-- MPPT 전력 추이 그래프 -->
 			<div class="row">
+				<div class="span12">
+					<h3>MPPT 전력</h3>
+					<div id="mppt-chartdiv" style="height: 200px; width: 100%;"></div>
+				</div>
+			</div>
+
+			<!-- 장치 선택 / 커스텀 차트 (과거 CAN 이력 데이터 조회용) -->
+			<div class="row" style="margin-top: 20px;">
 				<div class="span6">
 					<form method="post" class="form-horizontal">
 						<div class="control-group">
-							<label class="control-label" for="c1-devices">Device</label>
+							<label class="control-label" for="c1-devices">장치</label>
 							<div class="controls">
 								<select id="c1-devices" name="c1-devices" class="device-select">
-									<option value="">-- Please select --</option>
+									<option value="">-- 선택하세요 --</option>
 									<option th:each="dev : ${devices}" th:value="${dev.id}"
-										th:text="${dev.name}">Device</option>
+										th:text="${dev.name}">장치</option>
 								</select>
 							</div>
 						</div>
 						<div class="control-group">
-							<label class="control-label" for="c1-measurements">Measurement</label>
+							<label class="control-label" for="c1-measurements">측정항목</label>
 							<div class="controls">
 								<select id="c1-measurements" name="c1-measurements" class="measurement-select"></select>
 							</div>
 						</div>
 						<div class="control-group">
-							<label class="control-label" for="c1-dataPoints">Data Point</label>
+							<label class="control-label" for="c1-dataPoints">데이터 포인트</label>
 							<div class="controls">
 								<select id="c1-dataPoints" name="c1-dataPoints" class="dataPoint-select" data-chart-idx="0"></select>
 							</div>
 						</div>
 						<div class="control-group">
-							<label class="control-label" for="c1-devices">Auto Refresh</label>
+							<label class="control-label" for="c1-devices">자동 갱신</label>
 							<div class="controls">
 								<div class="make-switch live-data-switch">
 								    <input id="c1-onoff" type="checkbox" />
@@ -60,35 +477,34 @@
 							</div>
 						</div>
 					</form>
-					
-					<div id="c1-chartdiv" style="height: 300px; width: 500px;"></div>
+					<div id="c1-chartdiv" style="height: 250px; width: 100%;"></div>
 				</div>
 				<div class="span6">
 					<form method="post" class="form-horizontal">
 						<div class="control-group">
-							<label class="control-label" for="c2-devices">Device</label>
+							<label class="control-label" for="c2-devices">장치</label>
 							<div class="controls">
 								<select id="c2-devices" name="c2-devices" class="device-select">
-									<option value="">-- Please select --</option>
+									<option value="">-- 선택하세요 --</option>
 									<option th:each="dev : ${devices}" th:value="${dev.id}"
-										th:text="${dev.name}">Device</option>
+										th:text="${dev.name}">장치</option>
 								</select>
 							</div>
 						</div>
 						<div class="control-group">
-							<label class="control-label" for="c2-measurements">Measurement</label>
+							<label class="control-label" for="c2-measurements">측정항목</label>
 							<div class="controls">
 								<select id="c2-measurements" name="c2-measurements" class="measurement-select"></select>
 							</div>
 						</div>
 						<div class="control-group">
-							<label class="control-label" for="c2-dataPoints">Data Point</label>
+							<label class="control-label" for="c2-dataPoints">데이터 포인트</label>
 							<div class="controls">
 								<select id="c2-dataPoints" name="c2-dataPoints" class="dataPoint-select" data-chart-idx="1"></select>
 							</div>
 						</div>
 						<div class="control-group">
-							<label class="control-label" for="c2-devices">Auto Refresh</label>
+							<label class="control-label" for="c2-devices">자동 갱신</label>
 							<div class="controls">
 								<div class="make-switch live-data-switch">
 								    <input id="c2-onoff" type="checkbox" />
@@ -96,128 +512,14 @@
 							</div>
 						</div>
 					</form>
-					<div id="c2-chartdiv" style="height: 300px; width: 500px;"></div>
-				</div>
-			</div>
-			
-			<div class="row">
-				<div class="span12">
-					<h3>Vehicle Velocity</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>Vehicle Velocity (m/s)</th>
-								<th>Vehicle Velocity (km/h)</th>
-								<th>Motor RPM</th>
-								<th>Throttle SetPoint</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td id="vehicleVelocityFormatted" class="okay">0</td>
-								<td id="vehicleVelocityKMHFormatted" class="okay">0</td>
-								<td id="motorRpm" class="okay">0</td>
-								<td id="throttleSetPointFormatted" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-			</div>
-			
-			<div class="row">
-				<div class="span12">
-					<h3>Battery State of Charge/Balance</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>SOC Percentage</th>
-								<th>SOC (aH)</th>			
-								<th>Pack Voltage (mV)</th>
-								<th>Pack Current (mA)</th>
-								<th>Pack Power (W)</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td id="socPercentage" class="okay">0</td>
-								<td id="socAh" class="okay">0</td>
-								<td id="packVoltage" class="okay">0</td>
-								<td id="packCurrent" class="okay">0</td>
-								<td id="packPowerFormatted" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-			</div>
-			<div class="row">
-				<div class="span12">
-					<h3>Motor Controller Temps</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>WS22 Heatsink Temp</th>
-								<th>Motor Temperature</th>							
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td id="ws22HeatsinkTemperature" class="okay">0</td>
-								<td id="motorTemperature" class="okay">0</td>								
-							</tr>
-						</tbody>
-					</table>	
-				</div>
-			</div>
-			
-			<div class="row">
-				<div class="span12">
-					<h3>MPPTs</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>MPPT</th>
-								<th>Voltage (V)</th>
-								<th>Amps (A)</th>
-								<th>Power (W)</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td class="okay">1</td>
-								<td id="voltage1" class="okay">0</td>
-								<td id="amps1" class="okay">0</td>
-								<td id="power1" class="okay">0</td>
-							</tr>
-							<tr>
-								<td class="okay">2</td>
-								<td id="voltage2" class="okay">0</td>
-								<td id="amps2" class="okay">0</td>
-								<td id="power2" class="okay">0</td>
-							</tr>
-							<tr>
-								<td class="okay">3</td>
-								<td id="voltage3" class="okay">0</td>
-								<td id="amps3" class="okay">0</td>
-								<td id="power3" class="okay">0</td>
-							</tr>
-							<tr>
-								<td class="okay"><b>Total</b></td>
-								<td/>
-								<td/>
-								<td id="totalPower3" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>	
+					<div id="c2-chartdiv" style="height: 250px; width: 100%;"></div>
 				</div>
 			</div>
 
 			<hr />
-		
 			<div th:replace="footer :: details"></div>
-		
 		</div>
-		<!-- /container -->
-	
+
 		<script type="text/javascript" th:src="@{/js/vendor/jquery-1.9.1.min.js}"></script>
 		<script type="text/javascript" th:src="@{/js/vendor/bootstrap.min.js}"></script>
 		<script type="text/javascript" th:src="@{/js/bootstrap-switch.min.js}"></script>

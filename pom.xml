@@ -30,7 +30,7 @@
 		<repository>
 			<id>maven2-repository.dev.java.net</id>
 			<name>Java.net Maven 2 Repository</name>
-			<url>http://download.java.net/maven/2</url>
+			<url>https://download.java.net/maven/2</url>
 			<layout>default</layout>
 			<snapshots>
 				<enabled>true</enabled>
@@ -38,12 +38,12 @@
 		</repository>
 		<repository>
 			<id>spring-milestones</id>
-			<url>http://repo.spring.io/libs-milestone/</url>
+			<url>https://repo.spring.io/libs-milestone/</url>
 		</repository>
 		<repository>
 			<id>splunk-artifactory</id>
 			<name>Splunk Releases</name>
-			<url>http://splunk.artifactoryonline.com/splunk/ext-releases-local</url>
+			<url>https://splunk.jfrog.io/splunk/ext-releases-local</url>
 		</repository>
 	</repositories>
 	<build>
@@ -310,6 +310,11 @@
 		</dependency>
 
 		<!-- Database and connectivity -->
+		<dependency>
+			<groupId>com.fazecast</groupId>
+			<artifactId>jSerialComm</artifactId>
+			<version>2.10.4</version>
+		</dependency>
 		<dependency>
 			<groupId>org.apache.tomcat</groupId>
 			<artifactId>tomcat-jdbc</artifactId>

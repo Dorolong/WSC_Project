@@ -7,23 +7,23 @@
 				<a class="btn btn-navbar" data-toggle="collapse"
 					data-target=".nav-collapse"> <span class="icon-bar"></span> <span
 					class="icon-bar"></span> <span class="icon-bar"></span>
-				</a> <a class="brand" href="#"><img th:src="@{/img/Prohelion_Logo_Medium.png}" width="100" height="30"/></a>
+				</a> <a class="brand" href="#"><img th:src="@{/KUST_Logo(Bssic).png}" width="100" height="30"/></a>
 				<div class="nav-collapse collapse">
 					<ul class="nav">
-						<li class=""><a href="#" th:href="@{/}">Dashboard</a></li>
-						<!-- <li class=""><a href="#" th:href="@{/strategy.html}">Strategy</a></li>  -->
-						<li class=""><a href="#" th:href="@{/bms.html}">BMS Summary</a></li>
+						<li class=""><a href="#" th:href="@{/}">대시보드</a></li>
+						<!-- <li class=""><a href="#" th:href="@{/strategy.html}">전략</a></li>  -->
+						<li class=""><a href="#" th:href="@{/bms.html}">BMS 요약</a></li>
 						<li class="dropdown">
-							<a href="#" class="dropdown-toggle" data-toggle="dropdown">Real-time (2min) <b class="caret"></b></a>
+							<a href="#" class="dropdown-toggle" data-toggle="dropdown">실시간 (2분) <b class="caret"></b></a>
 							<ul class="dropdown-menu">
 								<li class="dropdown-submenu" th:each="device : ${devices}">
-									<a th:text="${device.Name}">Device</a>
+									<a th:text="${device.Name}">장치</a>
 									<ul class="dropdown-menu">
 										<li class="dropdown-submenu" th:each="measurement : ${device.measurements}">
-											<a th:text="${measurement.Name}">Measurement</a>
+											<a th:text="${measurement.Name}">측정항목</a>
 											<ul class="dropdown-menu">
 												<li th:each="dataPoint : ${measurement.dataPoints}">
-													<a th:href="@{/chart.html(deviceId=${dataPoint.DataPointCanId})}" th:text="${dataPoint.Name}">Data Point</a>
+													<a th:href="@{/chart.html(deviceId=${dataPoint.DataPointCanId})}" th:text="${dataPoint.Name}">데이터 포인트</a>
 												</li>
 											</ul>
 										</li>
@@ -32,16 +32,16 @@
 							</ul>
 						</li>
 						<li class="dropdown">
-							<a href="#" class="dropdown-toggle" data-toggle="dropdown">Short (10min) <b class="caret"></b></a>
+							<a href="#" class="dropdown-toggle" data-toggle="dropdown">단기 (10분) <b class="caret"></b></a>
 							<ul class="dropdown-menu">
 								<li class="dropdown-submenu" th:each="device : ${devices}">
-									<a th:text="${device.Name}">Device</a>
+									<a th:text="${device.Name}">장치</a>
 									<ul class="dropdown-menu">
 										<li class="dropdown-submenu" th:each="measurement : ${device.measurements}">
-											<a th:text="${measurement.Name}">Measurement</a>
+											<a th:text="${measurement.Name}">측정항목</a>
 											<ul class="dropdown-menu">
 												<li th:each="dataPoint : ${measurement.dataPoints}">
-													<a th:href="@{'/trend/' + ${dataPoint.DataPointCanId.toString() + '/short/chart.html'}}" th:text="${dataPoint.Name}">Data Point</a>
+													<a th:href="@{'/trend/' + ${dataPoint.DataPointCanId.toString() + '/short/chart.html'}}" th:text="${dataPoint.Name}">데이터 포인트</a>
 												</li>
 											</ul>
 										</li>
@@ -50,16 +50,16 @@
 							</ul>
 						</li>
 						<li class="dropdown">
-							<a href="#" class="dropdown-toggle" data-toggle="dropdown">Medium (Today)<b class="caret"></b></a>
+							<a href="#" class="dropdown-toggle" data-toggle="dropdown">중기 (오늘)<b class="caret"></b></a>
 							<ul class="dropdown-menu">
 								<li class="dropdown-submenu" th:each="device : ${devices}">
-									<a th:text="${device.Name}">Device</a>
+									<a th:text="${device.Name}">장치</a>
 									<ul class="dropdown-menu">
 										<li class="dropdown-submenu" th:each="measurement : ${device.measurements}">
-											<a th:text="${measurement.Name}">Measurement</a>
+											<a th:text="${measurement.Name}">측정항목</a>
 											<ul class="dropdown-menu">
 												<li th:each="dataPoint : ${measurement.dataPoints}">
-													<a th:href="@{'/trend/' + ${dataPoint.DataPointCanId.toString() + '/medium/chart.html'}}" th:text="${dataPoint.Name}">Data Point</a>
+													<a th:href="@{'/trend/' + ${dataPoint.DataPointCanId.toString() + '/medium/chart.html'}}" th:text="${dataPoint.Name}">데이터 포인트</a>
 												</li>
 											</ul>
 										</li>
@@ -67,10 +67,13 @@
 								</li>
 							</ul>
 						</li>
-						<!--  <li class=""><a href="#" th:href="@{/laptracker.html}">LapTracker</a></li> -->
-						<li class=""><a href="#" th:href="@{/fleet.html}">Fleet Management</a></li>		
-						<li class=""><a href="#" th:href="@{/config.html}">Config</a></li>
-						<li class=""><a href="#" th:href="@{/logout}">Logout</a></li>
+						<!--  <li class=""><a href="#" th:href="@{/laptracker.html}">랩 트래커</a></li> -->
+						<li class=""><a href="#" th:href="@{/fleet.html}">차량 관리</a></li>		
+						<li class=""><a href="#" th:href="@{/config.html}">설정</a></li>
+						<li class=""><a href="#" th:href="@{/logout}">로그아웃</a></li>
+						<li class="" style="padding-top:10px; padding-left:10px;">
+							<span id="status-led" style="display:inline-block; width:18px; height:18px; border-radius:50%; background-color:#2ECC71; border:2px solid #fff; box-shadow:0 0 6px rgba(46,204,113,0.8); vertical-align:middle;" title="정상"></span>
+						</li>
         			</ul>
 				</div>
 				<!--/.nav-collapse -->
@@ -78,7 +81,4 @@
 		</div>
 	</div>	
 </body>
-
-
-
 </html>

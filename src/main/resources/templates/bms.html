@@ -10,286 +10,252 @@
 		<link rel="stylesheet" th:href="@{/css/bootstrap.min.css}" />
 		<link rel="stylesheet" th:href="@{/css/main.css}" />
 		<link rel="stylesheet" th:href="@{/css/bootstrap-responsive.min.css}" />
-		<link rel="stylesheet" th:href="@{/css/main.css}" />
-		
+
+		<style>
+		body { padding-top: 5px; padding-bottom: 5px; }
+		h3 { margin: 14px 0 4px 0; font-size: 15px; }
+		.table { font-size: 12px; margin-bottom: 10px; }
+		.table th, .table td { padding: 3px 6px; }
+		td.Normal, td.okay { color: #2ECC71; }
+		td.HighWarn, td.LowWarn, td.warning { color: #F39C12; }
+		td.HighErr, td.LowErr, td.error, td.alert { color: #E74C3C; font-weight: bold; }
+		.cell-table td { text-align: center; min-width: 44px; }
+		</style>
+
 		<script th:src="@{/js/vendor/modernizr-2.6.2-respond-1.1.0.min.js}"></script>
 	</head>
 	<body>
 		<div th:replace="header :: menu"></div>
-	
+
 		<div class="container">
-	
-			<!-- Example row of columns -->
+
 			<div class="row">
-
 				<div class="span12">
-					<h3>Battery State of Charge/Balance</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>SOC Percentage</th>
-								<th>SOC (aH)</th>
-								<th>Pack Current (mA)</th>
-								<th>Pack Voltage (mV)</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr id="sb0">
-								<td id="28484" class="okay">0</td>
-								<td id="28480" class="okay">0</td>
-								<td id="28580" class="okay">0</td>
-								<td id="28576" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-
-				<div class="span12">
-					<h3>Cell Voltages</h3>
-	
-					<table>
-						<thead>
-							<tr>
-								<th>CMU</th>
-								<th>Cell Temp (C)</th>
-								<th>PCB Temp (C)</th>
-								<th>Cell 0 mV</th>
-								<th>Cell 1 mV</th>
-								<th>Cell 2 mV</th>
-								<th>Cell 3 mV</th>
-								<th>Cell 4 mV</th>
-								<th>Cell 5 mV</th>
-								<th>Cell 6 mV</th>
-								<th>Cell 7 mV</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr id="cl0">
-								<td>CMU 1</td>  									
-													
-								<td id="24596" class="okay">0</td>
-								<td id="24598" class="okay">0</td>
-																					
-								<td id="24608" class="okay">0</td>
-								<td id="24610" class="okay">0</td>
-								<td id="24612" class="okay">0</td>
-								<td id="24614" class="okay">0</td>
-								<td id="24624" class="okay">0</td>
-								<td id="24626" class="okay">0</td>
-								<td id="24628" class="okay">0</td>
-								<td id="24630" class="okay">0</td>
-							</tr>
-							<tr id="cl1">
-								<td>CMU 2</td>
-								
-								<td id="24644" class="okay">0</td>
-								<td id="24646" class="okay">0</td>
-																	
-								<td id="24656" class="okay">0</td>
-								<td id="24658" class="okay">0</td>
-								<td id="24660" class="okay">0</td>
-								<td id="24662" class="okay">0</td>
-								<td id="24672" class="okay">0</td>
-								<td id="24674" class="okay">0</td>
-								<td id="24676" class="okay">0</td>
-								<td id="24678" class="okay">0</td>
-							</tr>
-							<tr id="cl2">													
-								<td>CMU 3</td>
-								
-								<td id="24692" class="okay">0</td>
-								<td id="24694" class="okay">0</td>
-																
-								<td id="24704" class="okay">0</td>
-								<td id="24706" class="okay">0</td>
-								<td id="24708" class="okay">0</td>
-								<td id="24710" class="okay">0</td>
-								<td id="24720" class="okay">0</td>
-								<td id="24722" class="okay">0</td>
-								<td id="24724" class="okay">0</td>
-								<td id="24726" class="okay">0</td>
-							</tr>
-							<tr id="cl3">
-								<td>CMU 4</td>
-								
-								<td id="24740" class="okay">0</td>
-								<td id="24742" class="okay">0</td>
-																							
-								<td id="24752" class="okay">0</td>
-								<td id="24754" class="okay">0</td>
-								<td id="24756" class="okay">0</td>
-								<td id="24758" class="okay">0</td>
-								<td id="24768" class="okay">0</td>
-								<td id="24770" class="okay">0</td>
-								<td id="24772" class="okay">0</td>
-								<td id="24774" class="okay">0</td>
-							</tr>
-							<tr id="cl4">
-								<td>CMU 5</td>
-								
-								<td id="24788" class="okay">0</td>
-								<td id="24790" class="okay">0</td>								
-																	
-								<td id="24800" class="okay">0</td>
-								<td id="24802" class="okay">0</td>
-								<td id="24804" class="okay">0</td>
-								<td id="24806" class="okay">0</td>
-								<td id="24816" class="okay">0</td>
-								<td id="24818" class="okay">0</td>
-								<td id="24820" class="okay">0</td>
-								<td id="24822" class="okay">0</td>
-							</tr>							
-						</tbody>
-					</table>
-				</div>
-
-
-				<div class="span12">
-					<h3>Cell Min/Max Voltage</h3>
-					<table>
+					<h3>배터리 충전 상태 (BOT / TOP)</h3>
+					<table class="table table-bordered table-condensed">
 						<thead>
 							<tr>
 								<th></th>
-								<th>CMU Number</th>
-								<th>Cell Number</th>
-								<th>Value</th>
+								<th>SOC (%)</th>
+								<th>Stack 전압 (V)</th>
+								<th>Pack 전압 (V)</th>
+								<th>전류 (A)</th>
+								<th>Max Cell (mV)</th>
+								<th>Min Cell (mV)</th>
+								<th>Cell 온도 (℃)</th>
+								<th>Alarm</th>
+								<th>Fault</th>
 							</tr>
 						</thead>
 						<tbody>
-							<tr id="cmmv0">
-								<td>Minimum</td>
-								<td id="28548" class="okay">0</td>
-								<td id="28549" class="okay">0</td>
-								<td id="28544" class="okay">0</td>
-							</tr>
-							<tr id="cmmv1">
-								<td>Maximum</td>
-								<td id="28550" class="okay">0</td>
-								<td id="28551" class="okay">0</td>
-								<td id="28546" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-
-				
-				
-				<div class="span12">
-					<h3>Fan Status</h3>
-					<table>
-						<thead>
 							<tr>
-								<th>12V Current CMUs</th>
-								<th>12V Current fans/Contactors</th>
-								<th>Fan Speed 0 (RPM)</th>
-								<th>Fan Speed 1 (RPM)</th>
+								<td><b>BOT</b></td>
+								<td id="bot-soc" class="okay">0</td>
+								<td id="bot-stackV" class="okay">0</td>
+								<td id="bot-packV" class="okay">0</td>
+								<td id="bot-current" class="okay">0</td>
+								<td id="bot-maxCell" class="okay">0</td>
+								<td id="bot-minCell" class="okay">0</td>
+								<td id="bot-temp" class="okay">0</td>
+								<td id="bot-alarm" class="okay">-</td>
+								<td id="bot-fault" class="okay">정상</td>
 							</tr>
-						</thead>
-						<tbody>
-							<tr id="ps0">
-								<td id="28614" class="okay">0</td>
-								<td id="28612" class="okay">0</td>
-								<td id="28608" class="okay">0</td>
-								<td id="28610" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-
-
-				
-				<div class="span12">
-					<h3>Charger Control</h3>
-					<table>
-						<thead>
 							<tr>
-								<th>Charge Cell Voltage Error(mV)</th>
-								<th>Cell Temperature Margin</th>
-								<th>Discharge Cell Voltage Error(mV)</th>
-								<th>Total Pack Capacity (aH)</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr id="cc0">
-								<td id="28518" class="okay">0</td>
-								<td id="28516" class="okay">0</td>
-								<td id="28514" class="okay">0</td>
-								<td id="28512" class="okay">0</td>
+								<td><b>TOP</b></td>
+								<td id="top-soc" class="okay">0</td>
+								<td id="top-stackV" class="okay">0</td>
+								<td id="top-packV" class="okay">0</td>
+								<td>-</td>
+								<td id="top-maxCell" class="okay">0</td>
+								<td id="top-minCell" class="okay">0</td>
+								<td id="top-temp" class="okay">0</td>
+								<td id="top-alarm" class="okay">-</td>
+								<td id="top-fault" class="okay">정상</td>
 							</tr>
 						</tbody>
 					</table>
 				</div>
-
-				<div class="span12">
-					<h3>PreCharge Status</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>PreCharge Timer</th>
-								<th>Timer Flag</th>
-								<th>PreCharge State</th>
-								<th>Contactor Status</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr id="ps0">
-								<td id="28535" class="okay">0</td>
-								<td id="28534" class="okay">0</td>
-								<td id="28529" class="okay">0</td>
-								<td id="28528" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-
-				
-				<div class="span12">
-					<h3>Pack Status</h3>
-					<table>
-						<thead>
-							<tr>
-								<th>BMU Firmware Build Number</th>
-								<th>CMU Count</th>
-								<th>Status Flags</th>
-								<th>Balance voltage threshold falling mV</th>
-								<th>Balance voltage threshold rising mV</th>
-								<th>BMU Model ID</th>
-								<th>BMU Hardware Version</th>
-								<th>Extended Status Flags</th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr id="ps0">
-								<td id="28598" class="okay">0</td>
-								<td id="28597" class="okay">0</td>
-								<td id="28596" class="okay">0</td>
-								<td id="28594" class="okay">0</td>
-								<td id="28592" class="okay">0</td>
-								<td id="28629" class="okay">0</td>
-								<td id="28628" class="okay">0</td>
-								<td id="28624" class="okay">0</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-				
-				
-				
 			</div>
-	
+
+			<div class="row">
+				<div class="span12">
+					<h3>셀 전압 — BOT (mV)</h3>
+					<table class="table table-bordered table-condensed cell-table">
+						<tbody id="bot-cell-row"></tbody>
+					</table>
+					<h3>셀 전압 — TOP (mV)</h3>
+					<table class="table table-bordered table-condensed cell-table">
+						<tbody id="top-cell-row"></tbody>
+					</table>
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="span6">
+					<h3>상세 온도 — BOT</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr><th>TS1</th><th>FET</th><th>Int</th><th>CFETOFF</th><th>HDQ</th><th>Max</th><th>Min</th><th>Avg</th></tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="bot-ts1" class="okay">0</td>
+								<td id="bot-fet" class="okay">0</td>
+								<td id="bot-int" class="okay">0</td>
+								<td id="bot-cfetoff" class="okay">0</td>
+								<td id="bot-hdq" class="okay">0</td>
+								<td id="bot-maxT" class="okay">0</td>
+								<td id="bot-minT" class="okay">0</td>
+								<td id="bot-avgT" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				<div class="span6">
+					<h3>상세 온도 — TOP</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr><th>TS1</th><th>FET</th><th>Int</th><th>CFETOFF</th><th>HDQ</th><th>Max</th><th>Min</th><th>Avg</th></tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="top-ts1" class="okay">0</td>
+								<td id="top-fet" class="okay">0</td>
+								<td id="top-int" class="okay">0</td>
+								<td id="top-cfetoff" class="okay">0</td>
+								<td id="top-hdq" class="okay">0</td>
+								<td id="top-maxT" class="okay">0</td>
+								<td id="top-minT" class="okay">0</td>
+								<td id="top-avgT" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="span12">
+					<h3>보조배터리(LV) — 충전 상태 / 셀 전압</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr><th>SOC (%)</th><th>SOC (Ah)</th><th>Pack 전압 (V)</th><th>Pack 전류 (A)</th></tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="lv-soc" class="okay">0</td>
+								<td id="lv-ah" class="okay">0</td>
+								<td id="lv-packV" class="okay">0</td>
+								<td id="lv-packI" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+					<table class="table table-bordered table-condensed cell-table">
+						<tbody id="lv-cell-row"></tbody>
+					</table>
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="span6">
+					<h3>셀 최소/최대 전압</h3>
+					<table class="table table-bordered table-condensed">
+						<thead><tr><th></th><th>CMU 번호</th><th>셀 번호</th><th>값 (mV)</th></tr></thead>
+						<tbody>
+							<tr><td>최소</td><td id="lv-minCmu" class="okay">0</td><td id="lv-minCell" class="okay">0</td><td id="lv-minV" class="okay">0</td></tr>
+							<tr><td>최대</td><td id="lv-maxCmu" class="okay">0</td><td id="lv-maxCell" class="okay">0</td><td id="lv-maxV" class="okay">0</td></tr>
+						</tbody>
+					</table>
+				</div>
+				<div class="span6">
+					<h3>팬 상태</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr><th>12V 전류 CMU (A)</th><th>12V 전류 팬/Contactor (A)</th><th>팬 속도 0 (RPM)</th><th>팬 속도 1 (RPM)</th></tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="lv-cmuI" class="okay">0</td>
+								<td id="lv-fanContactorI" class="okay">0</td>
+								<td id="lv-fan0" class="okay">0</td>
+								<td id="lv-fan1" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="span6">
+					<h3>충전기 제어</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr><th>충전 셀 전압 오차 (mV)</th><th>셀 온도 마진 (℃)</th><th>방전 셀 전압 오차 (mV)</th><th>총 팩 용량 (Ah)</th></tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="lv-chargeVErr" class="okay">0</td>
+								<td id="lv-tempMargin" class="okay">0</td>
+								<td id="lv-dischargeVErr" class="okay">0</td>
+								<td id="lv-totalCap" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				<div class="span6">
+					<h3>프리차지 상태</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr><th>프리차지 타이머</th><th>타이머 카운트</th><th>프리차지 상태</th><th>Contactor 상태</th></tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="lv-timerElapsed" class="okay">0</td>
+								<td id="lv-timerCnt" class="okay">0</td>
+								<td id="lv-prechargeState" class="okay">0</td>
+								<td id="lv-contactor" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<div class="row">
+				<div class="span12">
+					<h3>팩 상태</h3>
+					<table class="table table-bordered table-condensed">
+						<thead>
+							<tr>
+								<th>BMU 펌웨어 빌드 번호</th>
+								<th>CMU 수</th>
+								<th>상태 플래그</th>
+								<th>Balance Threshold Falling (mV)</th>
+								<th>Balance Threshold Rising (mV)</th>
+								<th>밸런싱 세션 (Ah)</th>
+								<th>밸런싱 세션 (%)</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td id="lv-fwBuild" class="okay">0</td>
+								<td id="lv-cmuCount" class="okay">0</td>
+								<td id="lv-statusFlags" class="okay">0</td>
+								<td id="lv-threshFalling" class="okay">0</td>
+								<td id="lv-threshRising" class="okay">0</td>
+								<td id="lv-balanceAh" class="okay">0</td>
+								<td id="lv-balancePct" class="okay">0</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+
 			<hr />
-	
 			<div th:replace="footer :: details"></div>
-	
 		</div>
-		<!-- /container -->
-	
-		<!-- script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script -->
+
 		<script src="/js/vendor/jquery-1.9.1.min.js"></script>
 		<script type="text/javascript">window.jQuery || document.write('\x3Cscript type="text/javascript" src="/js/vendor/jquery-1.9.1.min.js">\x3C/script>');</script>
-	
 		<script th:src="@{/js/vendor/bootstrap.min.js}"></script>
-		<script type="text/javascript" th:src="@{/js/jquery.flot.js}"></script>
 		<script th:src="@{/js/bms.js}"></script>
 	</body>
 </html>

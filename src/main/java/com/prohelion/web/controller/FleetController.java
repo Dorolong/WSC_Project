@@ -27,6 +27,7 @@ import com.prohelion.maps.Route;
 import com.prohelion.maps.impl.MapGenerator;
 import com.prohelion.model.MeasurementData;
 import com.prohelion.service.impl.FleetServiceImpl;
+import com.prohelion.service.impl.UartMessageService;
 
 @Controller
 @RequestMapping(value = "/")
@@ -54,6 +55,9 @@ public class FleetController extends AbstractController {
 
 	@Autowired
     FleetServiceImpl fleetService;
+
+	@Autowired
+    UartMessageService uartMessageService;
 	
     public FleetController() {
         
@@ -165,7 +169,15 @@ public class FleetController extends AbstractController {
          	case FleetMessage.MESSAGE_BOXBOXBOX: message = "BOX BOX BOX"; break;
 		 }	
 		 		 		 
-		 if (message != null && message.isEmpty() == false) fleetService.sendMessage("-d "+ receiver + ", " + message);
+		 if (message != null && message.isEmpty() == false) {
+			 fleetService.sendMessage("-d "+ receiver + ", " + message);
+
+			 // Team 또는 Arrow1이면 UART(COBS)로도 전송
+			 if (fleetMessage.getMessageReceiver() == FleetMessage.RECEIVER_TEAM
+				 || fleetMessage.getMessageReceiver() == FleetMessage.RECEIVER_ARROW1) {
+				 uartMessageService.sendMessage("-d " + receiver + ", " + message);
+			 }
+		 }
 		 return "fleet";
 	 }
 	 

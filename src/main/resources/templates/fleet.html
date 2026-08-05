@@ -19,23 +19,22 @@
 	
 		<div class="container">
 
-			<!-- Example row of columns -->
 			<div class="row">
 				
 				<div class="span12">
 				
-					<h3>Fleet Message Management</h3>
+					<h3>차량 메시지 관리</h3>
 				
 					<form method="post" action="message">
 	    			<table>
 	    				<tr>
 	        				<td>
 		        				<select name="messageOptions">
-		  							<option value="0">Typed Message</option>
-		  							<option value="1">Comms check?</option>
-		  							<option value="2">Lost comms</option>
-		  							<option value="3">Target = </option>
-		  							<option value="4">BOX BOX BOX</option>	  							
+		  							<option value="0">직접 입력</option>
+		  							<option value="1">통신 확인?</option>
+		  							<option value="2">통신 끊김</option>
+		  							<option value="3">목표 속도 = </option>
+		  							<option value="4">피트인 피트인 피트인</option>	  							
 								</select>
 						    </td>
 						    <td>
@@ -45,40 +44,39 @@
 	    				<tr>
 	    					<td>
 	    						<select name="messageReceiver">
-		  							<option value="0">Team</option>
+		  							<option value="0">팀 전체</option>
 		  							<option value="1">Arrow1</option>
-		  							<option value="2">Lead</option>
-		  							<option value="3">Chase</option>	  							
+		  							<option value="2">선두차</option>
+		  							<option value="3">추적차</option>	  							
 								</select>
 	    					</td>
 	        				<td>
-	            				<input type="submit" value="Send Message"/>        				        				        				
+	            				<input type="submit" value="메시지 전송"/>        				        				        				
 	        				</td>
-	
 	    				</tr>
 					</table>
 					</form>
 			</div>
 			
 			<div class="span12">
-					<h3>Please Select which map you require</h3>
+					<h3>지도 선택</h3>
 					
 					<table>
 						<tbody>
 							<tr>
-								<td><a href="/maps/ArrowPoint_Strategy.kml">Strategy Speed Predictions</a></td>
+								<td><a href="/maps/ArrowPoint_Strategy.kml">전략 속도 예측</a></td>
 							</tr>
 						</tbody>
 					</table>
 			</div>
 			
 			<div class="span12">
-					<h3>Reset Alerts</h3>
+					<h3>알림 초기화</h3>
 					
 					<table>
 						<tbody>
 							<tr>
-								<td><a href="/alertsReset">Click here to reset the alerts light</a></td>
+								<td><a href="/alertsReset">Alert LED 초기화</a></td>
 							</tr>
 						</tbody>
 					</table>
@@ -86,38 +84,37 @@
 			
 			<div class="span12">
 				
-					<h3>Data Point Manual Entry</h3>
+					<h3>데이터 포인트 수동 입력</h3>
 				
 					<form method="post" action="dataPoint">
 	    			<table>
 	    				<tr>
 	        				<td>
 		        				<select name="dataPointOptions">
-		  							<option value="0">Manual Entry</option>
-		  							<option value="13072">Latitude</option>
-		  							<option value="13076">Longitude</option>
-		  							<option value="13424">Distance Travelled (m)</option>
-		  							<option value="13428">Distance Remaining (m)</option>
-		  							<option value="16436">Velocity m/s</option>
-		  							<option value="13376">Total Array Power (w)</option>
-		  							<option value="13392">Bus Power (w)</option>
-		  							<option value="28484">SOC Percentage (ie 0.94)</option>	  							
+		  							<option value="0">수동 입력</option>
+		  							<option value="13072">위도</option>
+		  							<option value="13076">경도</option>
+		  							<option value="13424">주행 거리 (m)</option>
+		  							<option value="13428">남은 거리 (m)</option>
+		  							<option value="16436">속도 (m/s)</option>
+		  							<option value="13376">총 어레이 전력 (W)</option>
+		  							<option value="13392">버스 전력 (W)</option>
+		  							<option value="28484">SOC (%) (예: 0.94)</option>	  							
 								</select>
 						    </td>
 						    <td>
-						    	canDataPointID (if Manual) 
+						    	CAN 데이터포인트 ID (수동 입력 시) 
 	        					<input name="dataPoint" type="text"/>					        				
 							</td>
 	 				   	</tr> 				   				  
 	    				<tr>
 	    					<td>
-	    						Float Value
+	    						Float 값
 	    						<input name="fval" type="text"/>
 	    					</td>
 	        				<td>
-	            				<input type="submit" value="Send Packet"/>        				        				        				
+	            				<input type="submit" value="패킷 전송"/>        				        				        				
 	        				</td>
-	
 	    				</tr>
 					</table>
 					</form>
@@ -125,31 +122,30 @@
 			
 			<div class="span12">
 				
-					<h3>GPS Manual Entry</h3>
+					<h3>GPS 수동 입력</h3>
 				
 					<form method="post" action="gps">
 	    			<table>
 	    				<tr>
 						    <td>
-						    	Latitude
+						    	위도
 	        					<input name="latitude" type="text"/>					        				
 							</td>
 	 				   	</tr> 				   				  
 	    				<tr>
 	    					<td>
-	    						Longitude
+	    						경도
 	    						<input name="longitude" type="text"/>
 	    					</td>
 	    				</tr>
 	    				<tr>
 	        				<td>
-	            				<input type="submit" value="Send Packet"/>        				        				        				
+	            				<input type="submit" value="패킷 전송"/>        				        				        				
 	        				</td>	
 	    				</tr>
 					</table>
 					</form>
 			</div>			
-			
 			
 			</div>
 						
@@ -158,12 +154,9 @@
 			<div th:replace="footer :: details"></div>
 		
 		</div>	
-		<!-- /container -->
-	
-		<!-- script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script -->
+
 		<script src="/js/vendor/jquery-1.9.1.min.js"></script>
 		<script type="text/javascript">window.jQuery || document.write('\x3Cscript type="text/javascript" src="/js/vendor/jquery-1.9.1.min.js">\x3C/script>');</script>
-	
 		<script th:src="@{/js/vendor/bootstrap.min.js}"></script>
 		<script type="text/javascript" th:src="@{/js/jquery.flot.js}"></script>		
 	</body>
