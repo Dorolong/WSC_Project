@@ -129,6 +129,11 @@ sudo systemctl restart wsc-launcher
   사양이 작아서 보수적으로 잡아뒀어요. 나중에 서버 사양 올리면 늘려도 돼요)
 - `WSC_MAX_TRIALS` — 한 번 실행에 허용하는 최대 trial 수 (기본 100, 남용 방지용)
 - `WSC_MAX_SIM_CONCURRENT` — 동시에 몇 명까지 단일 시뮬레이션 실행을 허용할지 (기본 2)
+- `WSC_RUNS_STATE_PATH` — 서버 재시작 후 진행 카드/대기열 복원을 위한 상태 파일
+  경로 (기본 `outputs/runs_state.json`; access token은 저장하지 않음)
+- `WSC_RATELIMIT_ENABLED` — 레이트 리밋 전체 킬 스위치 (기본 `1`; 긴급 시 `0`)
+- `WSC_RATELIMIT_API_PER_MIN` — `/api/*` 요청 IP별 분당 허용량 (기본 300)
+- `WSC_RATELIMIT_RUN_PER_HOUR` — 실행 생성 요청 user_id별 시간당 허용량 (기본 20)
 - `WSC_LOG_LEVEL` — 서버 로그 레벨 (기본 `INFO`)
 
 ## 로그 확인
@@ -148,8 +153,11 @@ Optuna 탐색 자식 프로세스의 stdout/stderr는 실행마다
 
 ## 아직 안 된 것 / 한계 (솔직하게)
 
-- 실행 중이던 탐색/시뮬레이션은 서버가 재시작되면(재부팅, systemd 재시작 등)
-  사라져요. 진행 상황이 메모리에만 있어서예요. 완료된 Optuna 결과와 시뮬레이션
-  CSV/figure는 파일로 남습니다.
+- 진행 카드와 대기열은 `outputs/runs_state.json`에서 복원합니다. 다만 access
+  token은 저장하지 않으므로, 재시작 전에 대기 중이던 Optuna 작업은 안전하게
+  `interrupted`로 표시됩니다. 완료된 Optuna 결과와 시뮬레이션 CSV/figure는 파일로
+  남습니다.
+- `/api/*`에는 레이트 리밋이 있습니다. 정상 폴링은 기본값에서 막히지 않도록
+  여유를 두었고, 문제가 생기면 `WSC_RATELIMIT_ENABLED=0`으로 즉시 끌 수 있습니다.
 - 서버 배포 후에는 실제 계정으로 로그인 → 시뮬레이션 실행 → 차트/CSV 확인 →
   Optuna 탐색 시작까지 한 번 눈으로 확인하세요.

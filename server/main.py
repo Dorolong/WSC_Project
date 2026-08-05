@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.logging_conf import setup_logging
+from server.rate_limit import ApiRateLimitMiddleware, enforce_run_creation_rate
 from shared.cfg_serde import cfg_to_jsonable
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +59,7 @@ logger = setup_logging(LOGS_DIR)
 logger.info("WSC Optuna launcher starting")
 
 app = FastAPI(title="WSC Optuna Launcher")
+app.add_middleware(ApiRateLimitMiddleware)
 
 
 @app.middleware("http")
@@ -560,6 +562,7 @@ def get_my_active_run(authorization: str | None = Header(default=None)):
 @app.post("/api/runs")
 def create_run(payload: dict, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
+    enforce_run_creation_rate(user.get("id"), "/api/runs")
     access_token = authorization.removeprefix("Bearer ").strip()
     n_trials = int(payload.get("n_trials", 20))
     if n_trials < 1 or n_trials > MAX_TRIALS_PER_RUN:
@@ -686,6 +689,7 @@ def _read_sim_progress(run_id: str):
 @app.post("/api/sim/runs")
 def create_sim_run(payload: dict, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
+    enforce_run_creation_rate(user.get("id"), "/api/sim/runs")
     run_id = uuid.uuid4().hex[:12]
     params = payload.get("params") or {}
     cfg = payload.get("cfg") or {}
