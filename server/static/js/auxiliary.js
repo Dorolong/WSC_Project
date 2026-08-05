@@ -3,6 +3,23 @@ import { getCurrentUser, getSupabaseClient } from "./auth.js";
 const dialog = () => document.getElementById("auxDialog");
 const titleEl = () => document.getElementById("auxTitle");
 const bodyEl = () => document.getElementById("auxBody");
+const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/Dorolong/WSC_Project/main";
+const CODE_VIEWER_FILES = [
+  ["app.py", "Legacy Streamlit app"],
+  ["Configs/Vehicle_Params.py", "Vehicle configuration"],
+  ["Functions/Vehicle_Function.py", "Simulation engine"],
+  ["mpc/mpc_controller.py", "MPC speed planner"],
+  ["Environment/Open_Meteo_API.py", "Weather data"],
+  ["scripts/main.py", "Optuna objective"],
+  ["server/main.py", "FastAPI server"],
+  ["server/sim_runner.py", "Simulation runner"],
+  ["server/study_runner.py", "Optuna runner"],
+  ["shared/cfg_serde.py", "Config serialization"],
+  ["server/static/index.html", "HTML shell"],
+  ["server/static/js/simulator.js", "Simulator frontend"],
+  ["server/static/js/vehicle-config.js", "Vehicle settings frontend"],
+  ["server/static/js/optuna.js", "Optuna frontend"]
+];
 
 function openAux(title, html) {
   titleEl().textContent = title;
@@ -52,11 +69,34 @@ async function showTutorial() {
   });
 }
 
-async function showCode() {
-  const url = "https://raw.githubusercontent.com/Dorolong/WSC_Project/main/Functions/Vehicle_Function.py";
-  const res = await fetch(url);
+async function loadCodeFile(path) {
+  const codeTarget = document.getElementById("codeViewerTarget");
+  codeTarget.textContent = "Loading...";
+  const res = await fetch(`${GITHUB_RAW_BASE}/${path}`);
+  if (!res.ok) throw new Error(`${path} failed to load.`);
   const text = await res.text();
-  openAux("Code", `<pre class="code-block">${escapeHtml(text)}</pre>`);
+  codeTarget.textContent = text;
+}
+
+async function showCode() {
+  openAux(
+    "Code",
+    `
+      <p class="hint">GitHub main branch, read only.</p>
+      <div class="code-file-grid">
+        ${CODE_VIEWER_FILES.map(([path, desc]) => `<button class="btn secondary code-file-btn" type="button" data-path="${path}" title="${escapeHtml(desc)}">${path}</button>`).join("")}
+      </div>
+      <pre class="code-block" id="codeViewerTarget">Select a file.</pre>
+    `
+  );
+  document.querySelectorAll(".code-file-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      loadCodeFile(btn.dataset.path).catch((e) => {
+        document.getElementById("codeViewerTarget").textContent = e.message;
+      });
+    });
+  });
+  await loadCodeFile(CODE_VIEWER_FILES[0][0]);
 }
 
 function rowTime(value) {

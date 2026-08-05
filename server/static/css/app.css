@@ -466,6 +466,20 @@ input[type="number"] {
   font-size: 12px;
 }
 
+.code-file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.code-file-btn {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding-right: 18px;
