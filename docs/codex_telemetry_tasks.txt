@@ -28,13 +28,15 @@
 **배포**: 머지 후 서버에서 git pull + systemctl restart wsc-launcher.
 Codex 는 SSH 못 하므로 보고서에 명시할 것.
 
-**★ 다른 작업과의 순서**
-같은 server/main.py 를 건드리는 작업이 두 개 대기 중이다.
- - docs/codex_stop_run_task.txt (Optuna 중단 버튼)
- - docs/codex_security_tasks.txt 작업 3 (Supabase 키 환경변수화)
-**셋 중 하나씩 머지하고 다음을 시작할 것.** 이 지시서는 신규 파일이
-대부분이라 충돌 면적이 작으니, 앞의 둘 중 진행 중인 게 있으면
-그것을 먼저 끝내라.
+**★ 다른 작업과의 순서 (2026-08-05 갱신)**
+docs/codex_stop_run_task.txt(Optuna 중단 버튼)는 **이미 머지됐다**
+(커밋 e97cbc7, 앱 v1.2.0). 보안 작업 1(레이트 리밋)도 머지됐다(63cd86c).
+-> server/main.py 를 건드리는 대기 작업은 이제
+   **docs/codex_security_tasks.txt 의 작업 3(Supabase 키 환경변수화)**
+   하나뿐이다. 그것과 동시에 진행하지 말 것.
+이 지시서는 신규 파일이 대부분이라 충돌 면적이 작다. 다만
+server/main.py 에 업로드 API 를 추가하므로 줄 번호가 밀린다 -
+**착수 시점의 현재 코드를 기준으로 삼을 것.**
 
 **★ Phase 순서 (사용자 결정)**
  Phase 1 = **저장된 로그 파일 업로드·분석** (이 지시서)
