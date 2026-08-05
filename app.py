@@ -98,6 +98,13 @@ if "sim_running" not in st.session_state:
 # 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
 RELEASE_NOTES = [
     {
+        "version": "1.1.1",
+        "date": "2026-08-05",
+        "title": "통합 웹 회원가입 모달 추가",
+        "details": "- 통합 웹 로그인 화면에서 바로 회원가입할 수 있는 모달 추가\n"
+                    "- 가입 시 이름을 계정 닉네임으로 저장해서 대기열과 기록에 표시되도록 정리",
+    },
+    {
         "version": "1.1.0",
         "date": "2026-08-05",
         "title": "HTTPS 전환 — 이제 주소가 wsc-drive.duckdns.org 입니다",
