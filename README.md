@@ -17,6 +17,8 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 > | `progress/49_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
 > | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
 > | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
+> | `docs/이해_지도.md` | **이 프로젝트를 이해하는 학습 경로** — 무엇부터, 어디까지 알아야 하는가 |
+> | `docs/WSC_DriveEff_총괄기획안.pdf` | 설계 근거 총정리 (15p, 일반 독자용 각주 포함) |
 > | `SETUP.md` | 다른 컴퓨터에서 환경 재현하는 방법 |
 > | `server/README.md` | Optuna 웹 런처 서버 배포 가이드 |
 > | `CLAUDE.md` / `AGENTS.md` | AI 에이전트 작업 규칙 |
@@ -253,18 +255,19 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 토큰 노출을 닫았습니다. 배포 중 버그 3건(로그 client IP 누락, `optuna_runs`
 GRANT 누락, 토큰 만료 401)을 찾아 고쳤습니다 — 상세는 `progress/48`.
 
-### 1순위 — [`docs/codex_next_tasks.txt`](docs/codex_next_tasks.txt) 의 작업 2건
+### 1순위 — [`docs/codex_security_tasks.txt`](docs/codex_security_tasks.txt) 보안 후속
 
-1. **회원가입 모달** — 새 프론트에 회원가입이 **아예 없습니다.** 신규 팀원이
-   계정을 만들 방법이 없고, `app.py`를 없애면 가입 경로가 사라집니다.
-   사용자 영향이 가장 큽니다
-2. **서버 재시작 시 실행 상태 소실** — `RUNS`/`QUEUE`가 메모리 전용이라
-   재시작하면 진행률 카드가 사라지고 대기열 순번이 날아갑니다.
-   완료 결과는 파일+Supabase에 남으므로 데이터 유실은 아닙니다
+1. **레이트 리밋** — `/api/*` 요청과 실행 생성 요청에 제한을 둬서 공개 도메인
+   스캐너/남용으로부터 서버와 Supabase verify 호출량을 보호합니다
+2. **RLS/GRANT 전수 점검 + 스키마 SQL 문서화** — `optuna_runs`에서 GRANT 누락이
+   실제로 났으므로, 3개 Supabase 테이블 스키마와 정책을 재현 가능한 SQL로 정리합니다
+3. Supabase anon key 취급 정리, 의존성 취약점 점검, 백업 계획 정리
+
+회원가입 모달과 서버 재시작 시 실행 상태 복원은 이미 반영됐습니다.
 
 ### 남은 보안 항목 (`progress/46`에서 다음으로 미룬 것)
 
-- **레이트 리밋 없음** — 스캐너 probe가 실제로 로그에 잡히고 있습니다
+- **레이트 리밋** — 2026-08-05 코드 반영. 서버 pull/restart 후 실배포 확인 필요
 - Supabase anon key 하드코딩 (RLS 전제하 공개 가능 값이라 급하진 않음)
 - **RLS 정책 전수 점검** — `optuna_runs`에서 GRANT가 빠져 있었으므로 다른
   테이블도 확인할 값어치가 있습니다
