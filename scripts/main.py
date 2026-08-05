@@ -20,6 +20,14 @@ from mpc.mpc_controller import mpc_default_params
 from Configs.Vehicle_Params import build_default_cfg
 
 
+# ── 날씨 시드: 탐색용과 검증용을 반드시 분리한다 ─────────────────────
+# 같은 날씨로 튜닝하고 채점하면 "시험 문제로 공부하고 그 문제로 시험 보는"
+# 자기 채점이 된다. 그 5개 날씨에만 맞춰진 해가 나와도 알 방법이 없다.
+# 검증용은 표/파라미터가 **한 번도 본 적 없는** 날씨여야 한다.
+WEATHER_SEEDS_TRAIN = [1, 2, 3, 4, 5]           # 목적함수 평가용(기존 동작 유지)
+WEATHER_SEEDS_VALID = list(range(101, 131))     # 검증 전용 30개
+
+
 def build_objective():
     """
     경로/환경 데이터를 불러오고 objective(trial) 함수를 만들어 반환합니다.
@@ -78,9 +86,8 @@ def build_objective():
     dist_arr = env_data.index.get_level_values("total_distance_m").to_numpy()
     seg_idx = np.clip(np.searchsorted(cs_boundaries, dist_arr, side="right"), 0, n_segments - 1)
 
-    weather_seeds = [1, 2, 3, 4, 5]
-    env_dicts_fixed = []
-    for seed in weather_seeds:
+    def make_env_dict(seed):
+        """시드 하나로 섭동된 날씨 dict 하나를 만든다."""
         rng = np.random.default_rng(seed=seed)
         env_data_s = env_data.copy()
 
@@ -93,7 +100,10 @@ def build_objective():
         env_data_s["wind_speed_10m"] = (
             env_data["wind_speed_10m"] + z_shared * env_data["wind_speed_10m_std"]
         ).clip(lower=0)
-        env_dicts_fixed.append(env_data_s.to_dict("index"))
+        return env_data_s.to_dict("index")
+
+    # 탐색용 날씨는 미리 만들어 들고 있는다(매 trial 재생성하면 느림).
+    env_dicts_fixed = [make_env_dict(s) for s in WEATHER_SEEDS_TRAIN]
 
     route_np = {
         "dist":         route["total_distance_m"].to_numpy(),
@@ -182,8 +192,110 @@ def build_objective():
         "light_types": light_types,
         "speed_limit_dists": speed_limit_dists,
         "speed_limit_vals": speed_limit_vals,
+        # 검증용 날씨를 **미리 만들어두지 않고** 필요할 때 하나씩 만든다.
+        # 30개를 한꺼번에 들고 있으면 메모리가 감당 안 된다(1GB 서버 대응,
+        # 위 ENV_NEEDED_COLS 주석 참고).
+        "make_env_dict": make_env_dict,
     }
     return objective, context
+
+
+# 검증용 출발 상태 교란.
+# 정상 출발(SOC 1.0, 정시)로 한 번 달리면 경로 하나만 지나가므로 표/정책의
+# 극히 일부만 검증된다. 그런데 정책의 존재 이유는 **계획에서 벗어난 상태**에
+# 답하는 것이다. 그래서 일부러 나쁜 상태로 출발시켜 본다.
+#   soc      : 출발 SOC
+#   delay_h  : 일정 대비 몇 시간 뒤처진 상태로 출발하는가
+START_STATES = [
+    {"name": "정상",        "soc": 1.00, "delay_h": 0.0},
+    {"name": "SOC 70%",     "soc": 0.70, "delay_h": 0.0},
+    {"name": "SOC 50%",     "soc": 0.50, "delay_h": 0.0},
+    {"name": "2시간 지연",   "soc": 1.00, "delay_h": 2.0},
+    {"name": "SOC70+2h지연", "soc": 0.70, "delay_h": 2.0},
+]
+
+
+def evaluate_policy(params, context, seeds=None, start_states=None, verbose=True):
+    """검증용 날씨/출발상태에서 정책을 채점한다.
+
+    **탐색에 쓴 날씨(WEATHER_SEEDS_TRAIN)를 여기에 넣지 말 것.** 자기 채점이 된다.
+
+    완주 여부만 보지 않는다. 완주만 하고 느리면 의미가 없고, 완주해도
+    SOC 여유가 없었으면 운이 좋았던 것이므로 셋을 같이 본다.
+
+    반환: {"runs": [...], "완주율": float, "평균속도": {...}, "최저SOC": {...}}
+    한 번의 전 구간 시뮬레이션이 약 45초다. 시드 30개 x 출발상태 5개면
+    두 시간이 넘으니, 빠른 확인에는 seeds/start_states 를 줄여서 쓸 것.
+    """
+    import copy
+
+    seeds = list(WEATHER_SEEDS_VALID if seeds is None else seeds)
+    start_states = list(START_STATES if start_states is None else start_states)
+    overlap = set(seeds) & set(WEATHER_SEEDS_TRAIN)
+    if overlap:
+        raise ValueError(f"검증 시드에 탐색용 시드가 섞였습니다(자기 채점): {sorted(overlap)}")
+
+    race = context["race"]
+    runs = []
+    for seed in seeds:
+        env_dict_k = context["make_env_dict"](seed)      # 필요할 때 하나씩
+        for st in start_states:
+            cfg = copy.deepcopy(context["cfg"])
+            cfg.simpara.soc = st["soc"]
+            cfg.simpara.Accum_s = cfg.simpara.Accum_s + st["delay_h"] * 3600.0
+            df, reason = run_simulation(
+                {**mpc_default_params, **params}, context["route_np"], env_dict_k,
+                context["dist_vals"], context["nearest_map"], context["rad_max"],
+                context["light_dists"], context["light_types"],
+                context["speed_limit_dists"], context["speed_limit_vals"],
+                cfg, progress_cb=None,
+            )
+            finished = bool(df["dist"].max() >= race.total_distance)
+            runs.append({
+                "seed": seed, "출발": st["name"], "완주": finished,
+                "평균속도": float(df["v"].mean() * 3.6),
+                "최저SOC": float(df["soc"].min()),
+                "도달률": float(df["dist"].max() / race.total_distance),
+                "종료사유": reason,
+            })
+            if verbose:
+                r = runs[-1]
+                mark = "완주" if finished else f"실패({reason})"
+                print(f"  seed {seed:>3} · {st['name']:<11} {mark:<22}"
+                      f"평균 {r['평균속도']:5.1f}km/h  최저SOC {r['최저SOC']:.3f}")
+
+    fin = [r for r in runs if r["완주"]]
+    def stat(key, rows):
+        vals = [r[key] for r in rows]
+        return {"평균": sum(vals) / len(vals), "최소": min(vals), "최대": max(vals)} if vals else None
+
+    return {
+        "runs": runs,
+        "완주율": len(fin) / len(runs) if runs else 0.0,
+        "평균속도": stat("평균속도", fin),      # 완주한 것만
+        "최저SOC": stat("최저SOC", fin),
+        "도달률": stat("도달률", runs),          # 전체
+    }
+
+
+def compare_policies(policies, context, **kw):
+    """여러 정책을 **같은 검증셋**에서 비교한다.
+
+    policies: {"이름": params_dict, ...}
+    새 방식이 기존 규칙 기반보다 나은지는 같은 잣대로만 말할 수 있다.
+    mpc_controller.py 의 LV1~LV8 을 지우지 말고 기준선으로 남겨두는 이유.
+    """
+    out = {}
+    for name, params in policies.items():
+        print(f"\n── {name} ──")
+        out[name] = evaluate_policy(params, context, **kw)
+    print(f"\n{'정책':<20}{'완주율':>8}{'평균속도':>11}{'최저SOC':>10}")
+    print("─" * 50)
+    for name, r in out.items():
+        spd = f"{r['평균속도']['평균']:.1f}" if r["평균속도"] else "-"
+        soc = f"{r['최저SOC']['최소']:.3f}" if r["최저SOC"] else "-"
+        print(f"{name:<20}{r['완주율']*100:>7.0f}%{spd:>11}{soc:>10}")
+    return out
 
 
 def run_best_params_simulation(best_params, context, output_csv=None):
