@@ -23,9 +23,11 @@ from mpc.mpc_controller import mpc_default_params
 from Configs.Vehicle_Params import *
 from shared.cfg_serde import cfg_from_jsonable, cfg_to_jsonable
 
-# Optuna 탐색을 돌리는 오라클 서버 주소. IP가 바뀌면(인스턴스 재생성 등)
-# 여기만 고치면 돼요. 나중에 도메인을 연결하면 그 주소로 바꿔주세요.
-WSC_OPTUNA_SERVER_URL = "http://141.147.167.152:8000"
+# 오라클 서버 주소. Caddy 리버스 프록시 뒤에 있어서 https + 도메인으로 붙는다.
+# (예전에는 http://<IP>:8000 이었는데, 평문이라 Authorization 헤더의
+#  Supabase access token이 그대로 노출됐다 - progress/46 참고)
+# DuckDNS 도메인이라 오라클 IP가 바뀌어도 이 주소는 그대로다.
+WSC_OPTUNA_SERVER_URL = "https://wsc-drive.duckdns.org"
 
 # Supabase 클라이언트: st.session_state에 세션별로 저장(브라우저 세션마다 독립).
 # @st.cache_resource로 캐싱하면 서버 프로세스 전체에서 하나의 클라이언트를

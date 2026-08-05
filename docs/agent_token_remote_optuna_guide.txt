@@ -277,7 +277,7 @@ server/main.py에 추가할 API:
   scripts/remote_optuna.py
 
 환경변수:
-  WSC_OPTUNA_SERVER_URL=http://141.147.167.152:8000
+  WSC_OPTUNA_SERVER_URL=https://wsc-drive.duckdns.org
   WSC_AGENT_TOKEN=서버와_같은_agent_token
 
 명령:
@@ -359,7 +359,7 @@ server/main.py에 추가할 API:
 
 로컬 또는 Codex 실행 환경에서:
 
-  $env:WSC_OPTUNA_SERVER_URL="http://141.147.167.152:8000"
+  $env:WSC_OPTUNA_SERVER_URL="https://wsc-drive.duckdns.org"
   $env:WSC_AGENT_TOKEN="실제_agent_token"
 
   python scripts/remote_optuna.py start --trials 1

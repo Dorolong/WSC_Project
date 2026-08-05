@@ -1,0 +1,265 @@
+================================================================
+도메인 + TLS + 서버 보안 계획 (2026-08-05)
+================================================================
+[ 진행 상태 ]
+  Step 1 도메인 확보      부분 완료 - wsc-drive.duckdns.org 생성됨.
+                          current ip를 오라클 IP로 맞췄는지 확인 필요
+  Step 2 방화벽           미착수 (사용자 직접)
+  Step 3 Caddy 설치       미착수 (사용자 직접). 설정 파일은 준비됨
+  Step 4 레포 변경        **완료** - server/Caddyfile 신규,
+                          wsc-launcher.service 127.0.0.1 바인딩,
+                          app.py URL을 https 도메인으로
+  Step 5 배포·관통확인    미착수 (사용자 직접)
+  Step 6 HSTS 연장        미착수
+
+[ 대부분이 오라클 서버에서 SSH로 하는 작업이라 Codex 같은 에이전트가
+  대신 못 한다 - 아래 "작업 주체 분리" 참고. ]
+
+================================================================
+[ 배경 - 지금 무엇이 뚫려 있나 ]
+================================================================
+서버가 http://141.147.167.152:8000 로 **평문 HTTP + 생 IP**다.
+리버스 프록시도 TLS도 없이 uvicorn이 0.0.0.0:8000 에 직접 물려 있다.
+
+**실질적 위험은 로그인이 아니라 그 다음이다.**
+Supabase 로그인 자체는 https://...supabase.co 로 가니 안전하다.
+문제는 거기서 받은 access token 을 우리 서버에 보낼 때다:
+
+    Authorization: Bearer eyJhbGc...      <- HTTP 평문
+
+같은 네트워크(카페/학교 와이파이)에 있는 사람이 이 토큰을 그대로
+주워서 **본인 계정으로 API를 호출**할 수 있다. 게다가 HTML/JS도
+평문으로 내려가므로 중간에서 스크립트를 갈아끼우는 것도 가능하다.
+
+사용자 결정 (2026-08-05):
+  - 도메인: **무료 옵션으로 진행**
+  - TLS: **Caddy 리버스 프록시**
+  - 범위: **TLS + 방화벽 + 보안 헤더** (레이트리밋/시크릿 관리는 다음)
+
+================================================================
+[ 현재 상태 - 2026-08-05 코드 직접 확인 ]
+================================================================
+- CORS 미들웨어는 **이미 제거됨**(Phase 1). same-origin이라 정상.
+- uvicorn 이 0.0.0.0:8000 에 직접 바인딩(server/wsc-launcher.service).
+  리버스 프록시 없음. TLS 없음.
+- 보안 헤더 없음. 레이트리밋 없음.
+- **서버 실배포 자체가 아직 안 됐다**(progress/45 "검증 제한":
+  "Oracle 서버 systemd 배포/재시작은 아직 수행하지 않았다").
+
+- **프론트가 CSP 친화적이다** (확인 완료):
+    인라인 <script> 블록      0개 (외부 src 2개뿐)
+    인라인 이벤트 핸들러      0개 (onclick 등)
+    인라인 style 속성         0개
+  -> script-src 에 'unsafe-inline' 없이 엄격한 CSP가 가능하다.
+     Phase 1에서 JS를 모듈로 분리한 덕분이다.
+
+- 프론트가 실제로 부르는 외부 출처 (CSP 설계 근거):
+    https://cdn.plot.ly                    차트 라이브러리 (script)
+    https://esm.sh                         supabase-js 동적 import (script)
+    https://wijwbujsihhzzjzawfzp.supabase.co  인증/DB (connect)
+    https://raw.githubusercontent.com      코드 보기 기능 (connect)
+    https://github.com                     링크만 (href)
+
+================================================================
+[ 핵심 판단 - 첫 배포와 TLS를 같이 한다 ]
+================================================================
+progress/45 기준으로 **서버 배포가 아직 한 번도 안 됐다.**
+그러니 "평문으로 먼저 띄우고 나중에 HTTPS 붙이기"를 할 이유가 없다.
+**처음부터 Caddy 뒤에서 띄우는 게 순서상 더 싸고 안전하다.**
+
+이 계획은 백로그 1순위(런처 실기동 검증)와 합쳐서 진행하는 것을
+전제로 한다. 즉 "처음 배포 = HTTPS 배포".
+
+================================================================
+[ 도메인 선택 - DuckDNS 권장 ]
+================================================================
+무료 옵션 중 **DuckDNS**(https://www.duckdns.org)를 권장한다.
+확정: wsc-drive.duckdns.org
+
+**권장 이유 (중요):**
+DuckDNS 는 Public Suffix List 에 등재돼 있어서, 서브도메인마다
+Let's Encrypt **인증서 발급 rate limit 버킷이 독립**이다.
+
+**nip.io / sslip.io 는 쓰지 말 것.** IP를 그대로 도메인처럼 쓰는
+편의는 있지만(141.147.167.152.nip.io), PSL 등재 상태가 달라서
+전 세계 사용자가 rate limit 을 공유하게 되는 구조다. 남이 많이
+쓰는 날에 인증서 발급이 실패한다. 또 IP가 이름에 박혀 있어서
+오라클 인스턴스 IP가 바뀌면 도메인 자체가 바뀐다.
+
+**오라클 IP가 ephemeral 인지 reserved 인지 확인할 것.**
+기본값은 ephemeral 이라 인스턴스를 stop/start 하면 IP가 바뀐다.
+- 권장: 오라클 콘솔에서 **reserved public IP 로 전환**(무료 티어도 가능)
+- 아니면 DuckDNS 갱신 스크립트를 cron 에 걸어 IP 변경을 따라가게 할 것
+
+================================================================
+[ 작업 주체 분리 (중요) ]
+================================================================
+이 계획은 **대부분이 서버 작업이라 Codex 에게 위임할 수 없다.**
+Codex 는 오라클 서버에 SSH 할 수 없다.
+
+[사용자가 SSH/웹콘솔로 직접] - 아래 Step 1,2,3,5,6
+  - DuckDNS 가입 및 도메인 생성
+  - 오라클 콘솔 Security List 수정
+  - 서버에서 apt install caddy, iptables 수정
+  - systemctl 조작
+
+[레포에 커밋할 것 - Codex 위임 가능] - 아래 Step 4
+  - server/Caddyfile (신규)
+  - server/wsc-launcher.service 수정 (127.0.0.1 바인딩)
+  - server/main.py 보안 헤더 미들웨어 (Caddy 대신 앱에서 넣을 경우)
+  - server/README.md 배포 절차 갱신
+  - app.py 의 WSC_OPTUNA_SERVER_URL 을 https 도메인으로
+
+================================================================
+[ Step 1 - 도메인 확보 ]
+================================================================
+1-1. duckdns.org 가입(GitHub/Google 로그인 가능)
+1-2. 서브도메인 생성 (예: wsc-drive)
+1-3. current ip 란에 오라클 인스턴스의 public IP 입력 -> update
+1-4. 확인: nslookup wsc-drive.duckdns.org 가 그 IP를 돌려주는지
+1-5. (IP가 ephemeral 이면) 갱신 스크립트를 cron 에 등록
+     DuckDNS 가 제공하는 token 기반 curl 한 줄이면 된다.
+
+================================================================
+[ Step 2 - 방화벽 개방 (오라클은 2단계다) ]
+================================================================
+**함정: 오라클은 방화벽이 두 겹이다. 둘 다 열어야 한다.**
+한쪽만 열고 "왜 접속이 안 되지" 하는 게 가장 흔한 실패다.
+
+2-1. [오라클 콘솔] VCN -> Security Lists -> Ingress Rules
+       80/tcp   개방 (Let's Encrypt HTTP-01 챌린지에 필요)
+       443/tcp  개방
+       8000/tcp **삭제** (Caddy 뒤로 숨길 것이므로)
+2-2. [서버 안] Oracle Ubuntu 이미지는 iptables 가 기본적으로
+     22 외를 막아둔다. 반드시 같이 열고 **영구 저장**할 것:
+       sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+       sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+       sudo netfilter-persistent save
+     (netfilter-persistent 를 안 하면 재부팅 후 원상복구된다)
+
+================================================================
+[ Step 3 - Caddy 설치 및 구성 ]
+================================================================
+3-1. 설치 (공식 apt 저장소)
+3-2. /etc/caddy/Caddyfile 을 레포의 server/Caddyfile 로 교체하거나 심볼릭 링크
+3-3. sudo systemctl reload caddy
+3-4. 확인: https://wsc-drive.duckdns.org 접속 -> 자물쇠 표시
+     http:// 로 접속하면 자동으로 https 로 리다이렉트되는지도 확인
+
+Caddyfile 초안 (server/Caddyfile 로 커밋):
+
+    wsc-drive.duckdns.org {
+        reverse_proxy 127.0.0.1:8000
+
+        header {
+            # HSTS - 처음엔 짧게. 아래 "함정" 참고
+            Strict-Transport-Security "max-age=86400"
+            X-Content-Type-Options "nosniff"
+            X-Frame-Options "DENY"
+            Referrer-Policy "strict-origin-when-cross-origin"
+            Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.plot.ly https://esm.sh; connect-src 'self' https://esm.sh https://wijwbujsihhzzjzawfzp.supabase.co https://raw.githubusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+            -Server
+        }
+    }
+
+  * 정적 파일도 FastAPI 가 StaticFiles 로 서빙하므로 reverse_proxy
+    한 줄이면 된다. Caddy 에서 따로 file_server 를 두면 경로가
+    이중 관리되니 하지 말 것.
+  * Caddy 는 Let's Encrypt 인증서 발급/갱신을 자동으로 한다.
+    certbot cron 같은 걸 따로 만들지 말 것.
+
+================================================================
+[ Step 4 - 레포 변경 ] **완료 (2026-08-05)**
+================================================================
+실제로 적용된 것:
+  - server/Caddyfile 신규 (도메인 wsc-drive.duckdns.org 박아넣음,
+    CSP는 실측한 외부 출처 4곳만 허용, staging 발급 블록도 주석으로 포함)
+  - server/wsc-launcher.service: --host 127.0.0.1 +
+    --proxy-headers --forwarded-allow-ips 127.0.0.1
+  - app.py:28 WSC_OPTUNA_SERVER_URL -> https://wsc-drive.duckdns.org
+아래는 원래 지시 내용(참고용).
+
+4-1. **server/wsc-launcher.service 를 127.0.0.1 바인딩으로 변경**
+       ExecStart=... uvicorn server.main:app --host 127.0.0.1 --port 8000
+     **--host 0.0.0.0 을 그대로 두면 Caddy 를 세워도 8000 포트로
+     직접 들어오는 평문 경로가 남는다.** 방화벽에서 8000 을 막는
+     것과 이중으로 막을 것.
+     또한 프록시 뒤에 있으므로 --proxy-headers --forwarded-allow-ips 127.0.0.1
+     를 붙여 클라이언트 IP가 로그에 제대로 남게 할 것.
+4-2. server/Caddyfile 신규 커밋 (위 초안)
+4-3. app.py 의 WSC_OPTUNA_SERVER_URL 을 https://wsc-drive.duckdns.org 로.
+     (app.py 는 legacy 보관 중이지만 아직 살아있으므로 같이 고칠 것)
+4-4. server/README.md 에 이 배포 절차 반영, SETUP.md 에서 링크
+4-5. 로깅: --proxy-headers 적용 후 요청 로그의 client IP 가
+     127.0.0.1 로만 찍히지 않는지 확인
+
+================================================================
+[ Step 5 - 배포 및 관통 확인 ]
+================================================================
+progress/45 기준 서버 배포가 처음이므로 여기서 같이 한다.
+5-1. git pull, pip install -r server/requirements.txt
+5-2. systemd 서비스 갱신 후 restart
+5-3. https 로 접속해서 **로그인 -> 시뮬레이션 -> Optuna 탐색**까지 관통
+     (백로그 1순위 항목과 동일 - 여기서 한 번에 끝낸다)
+
+================================================================
+[ Step 6 - HSTS 기간 늘리기 (관통 확인 후) ]
+================================================================
+Step 3에서 max-age=86400(1일)로 시작한 뒤, 며칠 문제없이 돌면
+max-age=31536000(1년)으로 올린다.
+
+================================================================
+[ 함정 모음 (미리 알고 갈 것) ]
+================================================================
+F-1. **오라클 방화벽 2겹** - Security List 만 열고 iptables 를
+     안 열면 접속이 안 된다. 가장 흔한 실패. Step 2 참고.
+F-2. **netfilter-persistent save 누락** - 재부팅하면 원복된다.
+F-3. **uvicorn 0.0.0.0 방치** - Caddy 를 세워도 8000 평문 경로가
+     살아있어서 HTTPS 강제가 무의미해진다. Step 4-1.
+F-4. **CSP 로 앱이 조용히 깨진다** - cdn.plot.ly 나 esm.sh 를
+     빠뜨리면 차트가 안 뜨거나 로그인이 안 되는데, 화면에는
+     아무 에러도 안 보이고 콘솔에만 찍힌다. 적용 후 반드시
+     브라우저 콘솔을 확인할 것.
+     -> 처음엔 Content-Security-Policy-Report-Only 로 걸어서
+        위반을 관찰한 뒤 강제로 전환하는 것도 방법.
+F-5. **HSTS preload 를 처음부터 켜지 말 것** - preload 목록에
+     한번 올라가면 빼는 데 수개월 걸린다. 도메인/구성이 확정되기
+     전에는 preload 를 붙이지 않는다. max-age 도 짧게 시작.
+F-6. **ephemeral IP** - 인스턴스 stop/start 로 IP가 바뀌면
+     도메인이 엉뚱한 곳을 가리킨다. reserved IP 전환 권장.
+F-7. **Let's Encrypt rate limit** - 설정을 반복 실패하며 재시도하면
+     발급 한도에 걸린다. 구성 실험 중에는 Caddy 의 staging 발급
+     (acme_ca 를 LE staging 으로) 을 쓰다가 마지막에 전환할 것.
+
+================================================================
+[ 검증 조건 ]
+================================================================
+V-1. https:// 접속 시 브라우저 자물쇠 표시, 인증서 유효
+V-2. http:// 접속이 https 로 301/308 리다이렉트
+V-3. **http://<서버IP>:8000 이 외부에서 접속 불가**
+     (방화벽 + 127.0.0.1 바인딩 이중 확인)
+V-4. 로그인 -> 시뮬레이션 -> Optuna 탐색 관통 성공
+V-5. **브라우저 콘솔에 CSP 위반 0건**, 차트 정상 표시, 로그인 정상
+V-6. curl -I 로 보안 헤더 4종이 실제 응답에 붙는지 확인
+     (HSTS / X-Content-Type-Options / X-Frame-Options / CSP)
+V-7. 서버 로그의 client IP 가 실제 접속자 IP (127.0.0.1 아님)
+V-8. sudo reboot 후 자동 기동 - caddy, wsc-launcher 둘 다
+     + iptables 규칙 유지 확인
+
+================================================================
+[ 이번 범위에서 뺀 것 (다음 기획) ]
+================================================================
+- 레이트 리밋 (로그인/실행 요청 남용 방지)
+- Supabase anon key 등 하드코딩 값의 환경변수화
+  (anon key 는 RLS 전제하에 공개돼도 되는 값이라 급하진 않음.
+   백로그 3순위 4번과 동일 항목)
+- Supabase RLS 정책 재점검
+- 의존성 취약점 점검, 백업
+
+================================================================
+[ 상태 ]
+================================================================
+계획 수립만 완료. 착수 안 함.
+백로그 1순위(런처 실기동 검증)와 합쳐서 진행할 것 - 첫 배포를
+곧바로 HTTPS 로 하는 것이 이 계획의 전제다.
+================================================================
