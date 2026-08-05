@@ -1,5 +1,5 @@
 ================================================================
-향후 개선 과제 백로그 (2026-08-05 기준 최신, progress/42 대체)
+향후 개선 과제 백로그 (2026-08-05 기준 최신, progress/44 대체)
 ================================================================
 [ 이 파일의 번호는 항상 progress/ 폴더의 가장 끝 번호로 유지할 것 -
   완료된 항목은 여기서 지우고 progress/NN_주제.txt로 번호를 이어
@@ -56,20 +56,43 @@ v1.0.8) - 사용자가 체감할 새 기능을 배포할 때마다 리스트 맨
 오라클 서버(server/, Optuna 탐색 런처). 둘이 같은 Supabase를 공유.
 -> **이걸 한 벌로 합치는 계획이 progress/43에 수립됨(아래 트랙 A).**
 
-**지금 이어서 할 일 1순위 - Optuna 웹 런처 실제 동작 검증**
-(아래 트랙 A/B 양쪽의 선결 조건이기도 함)
-server/README.md에 명시된 대로, 원 작업이 인터넷 없는 환경에서 이뤄져
-**fastapi/uvicorn을 실제로 띄워본 적이 없음**. 다음을 눈으로 확인:
-1. 오라클 서버에서 `uvicorn server.main:app --host 0.0.0.0 --port 8000`
-   기동 -> 브라우저 접속(포트 8000 Security List 개방 필요)
-2. Supabase 계정 로그인 -> 탐색 시작 -> 진행률(N/전체)이 올라가는지 ->
-   완료 후 Streamlit 앱 사이드바 "내 Optuna 탐색 결과"에 뜨는지 ->
-   "이 파라미터로 시뮬레이션하기"까지 이어지는지
-3. Streamlit 앱 신규 기능(자동 로그인, 코드 보기)도 배포본에서 확인
-4. 문제 없으면 systemd 등록(server/README.md 절차)
+**지금 이어서 할 일 1순위 - 첫 배포를 HTTPS로 (progress/46)**
+서버가 **아직 한 번도 실제로 배포된 적이 없다**(progress/45 "검증 제한":
+"Oracle 서버 systemd 배포/재시작은 아직 수행하지 않았다").
+그러니 "평문으로 먼저 띄우고 나중에 HTTPS 붙이기"를 할 이유가 없다.
+**원래의 1순위(런처 실기동 검증)와 도메인/TLS 작업을 합쳐서
+처음부터 Caddy 뒤에서 띄운다.** 상세 계획: progress/46.
 
-**2순위 [트랙 A] 웹 통합 / HTML 전환 - 계획 완료, 미착수 (progress/43)**
+지금 뚫려 있는 것: http://141.147.167.152:8000 평문 + 생 IP.
+Supabase 로그인 자체는 https라 안전하지만, 받은 access token을
+우리 서버에 보낼 때 `Authorization: Bearer ...`가 **평문으로 나간다**.
+같은 네트워크에 있는 사람이 토큰을 주워 본인 계정으로 API 호출 가능.
+
+확정(2026-08-05): 도메인=무료(DuckDNS 권장), TLS=Caddy,
+범위=TLS+방화벽+보안헤더. 레이트리밋/시크릿 환경변수화는 다음 기획.
+
+순서 요약(상세는 progress/46):
+1. DuckDNS 도메인 확보 + A레코드
+2. 방화벽 **2겹** 개방(오라클 Security List + 서버 iptables,
+   netfilter-persistent save). 8000은 오히려 닫는다
+3. Caddy 설치 + server/Caddyfile 적용(인증서 자동 발급/갱신)
+4. [레포] uvicorn을 --host 127.0.0.1로, Caddyfile 커밋,
+   app.py의 WSC_OPTUNA_SERVER_URL을 https 도메인으로
+5. 배포 후 로그인->시뮬레이션->Optuna 탐색 관통 확인
+   (원래 1순위였던 실기동 검증을 여기서 같이 끝낸다)
+
+**작업 주체 주의**: 대부분이 SSH/오라클 콘솔 작업이라 Codex에게
+위임 못 한다. 레포 변경(4번)만 위임 가능. progress/46 "작업 주체 분리".
+
+**2순위 [트랙 A] 웹 통합 / HTML 전환 - 구현 완료, 배포 확인 전**
+계획 progress/43 / 지시서 docs/codex_web_migration_tasks.txt /
+Phase 0~1 결과 PR#1 / Phase 2~6 결과 progress/45.
+**Phase 0~6 코드는 전부 들어갔고, 남은 것은 실제 서버에서의 확인뿐이다**
+-> 위 1순위(HTTPS 첫 배포)에서 같이 끝난다.
+남은 결정: app.py 삭제 여부와 Streamlit Cloud 중단은 사용자 최종 확인 후.
 (트랙 A와 B는 서로 독립적. 어느 쪽을 먼저 할지는 사용자 판단.)
+
+[아래는 전환 당시의 배경/방침 기록 - 이력용]
 2026-08-05 사용자 요청. Streamlit UI를 HTML/CSS/JS + FastAPI로 전환하고
 Optuna 런처와 한 웹으로 합침. **결정적 이유는 "다른 HTML 기반 웹과
 합칠 예정"이라는 통합 제약**(시인성·로그는 부차적 이유).
@@ -168,10 +191,14 @@ scripts/remote_optuna.py CLI 신설 순서. 실제 구현은 아직 안 됨.
    user_settings처럼 정리해둘 것(Supabase 재구축 시 필요).
 3. SETUP.md에 server/ 배포 절차 링크 추가(현재 server/README.md에만
    있음).
-4. 서버 보안: server/main.py의 CORS가 allow_origins=["*"]이고 Supabase
-   anon key가 소스에 하드코딩(공개 레포). anon key는 RLS 전제하에
-   공개돼도 되는 값이라 당장 위험하진 않지만 노출 범위 검토.
-   **트랙 A에서 합칠 웹의 도메인이 정해지면 그때 좁힐 것.**
+4. 서버 보안:
+   - CORS allow_origins=["*"] -> **해결됨**. Phase 1에서 CORS
+     미들웨어 자체를 제거(same-origin이라 불필요).
+   - TLS/도메인/방화벽/보안헤더 -> **progress/46으로 분리, 1순위로
+     승격**(위 참고).
+   - Supabase anon key 하드코딩(공개 레포)은 아직 남음. RLS 전제하에
+     공개돼도 되는 값이라 급하진 않으나, progress/46 "이번 범위에서
+     뺀 것"에 레이트리밋과 함께 다음 기획 대상으로 적어둠.
 5. 서버 재시작 시 진행 중이던 탐색 상태가 사라짐(RUNS/QUEUE가 메모리
    전용). 완료 결과는 파일+Supabase에 남으므로 치명적이진 않음.
 

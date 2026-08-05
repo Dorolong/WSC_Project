@@ -39,18 +39,69 @@ source .venv/bin/activate
 pip install -r server/requirements.txt
 ```
 
-## 한 번 실행해서 확인
+## 한 번 실행해서 확인 (로컬에서만)
 
 ```bash
 source .venv/bin/activate
-uvicorn server.main:app --host 0.0.0.0 --port 8000
+uvicorn server.main:app --host 127.0.0.1 --port 8000
 ```
-브라우저에서 `http://서버IP:8000` 접속해서 로그인 화면이 뜨는지 확인하세요.
-(안 뜨면 오라클 콘솔의 **Security List**에서 포트 8000을 열어야 할 수 있어요 —
-가입 초반에 SSH 포트(22)만 열려있다고 말씀드렸던 그 부분이에요. VCN → Security Lists
-→ Ingress Rules 추가, 소스 0.0.0.0/0, 포트 8000.)
+같은 서버 안에서 `curl -I http://127.0.0.1:8000` 이 200을 주는지 확인하세요.
 
-여기까지 확인되면 `Ctrl+C`로 끄고, 아래처럼 자동 재시작되게 등록하세요.
+> ⚠️ **`--host 0.0.0.0` 으로 띄우지 마세요.** 이 앱은 Caddy 리버스 프록시
+> 뒤에서만 노출됩니다. 8000 포트를 외부에 직접 열면 Supabase access token이
+> 평문 HTTP로 오가는 경로가 생깁니다. 포트 8000은 방화벽에서 **닫아둡니다**.
+> 자세한 배경은 [`progress/46`](../progress/46_도메인_TLS_보안_계획.txt).
+
+여기까지 확인되면 `Ctrl+C`로 끄고, 아래 HTTPS 설정 → systemd 순서로 진행하세요.
+
+## HTTPS (도메인 + Caddy)
+
+도메인은 **`wsc-drive.duckdns.org`** (DuckDNS 무료). A 레코드가 이 서버의
+public IP를 가리켜야 합니다. `nslookup wsc-drive.duckdns.org` 로 확인하세요.
+
+### 1) 방화벽 — 오라클은 두 겹입니다
+
+**한쪽만 열고 "왜 접속이 안 되지" 하는 게 가장 흔한 실패입니다.**
+
+- **오라클 콘솔**: VCN → Security Lists → Ingress Rules
+  - `80/tcp` 개방 (Let's Encrypt 인증서 발급에 필요)
+  - `443/tcp` 개방
+  - `8000/tcp` **삭제** (Caddy 뒤로 숨기므로)
+- **서버 안** (Oracle Ubuntu 이미지는 iptables가 22 외를 막아둡니다):
+  ```bash
+  sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+  sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+  sudo netfilter-persistent save     # 이걸 빼면 재부팅 시 원복됩니다
+  ```
+
+### 2) Caddy 설치 및 적용
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
+sudo cp server/Caddyfile /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+sudo systemctl status caddy
+```
+
+인증서 발급/갱신은 Caddy가 자동으로 합니다. **certbot이나 갱신 cron을 따로
+만들지 마세요.**
+
+### 3) 확인
+
+- `https://wsc-drive.duckdns.org` 접속 → 자물쇠 표시
+- `http://` 로 접속하면 `https` 로 자동 리다이렉트되는지
+- **`http://<서버IP>:8000` 이 외부에서 접속 안 되는지** (되면 방화벽 확인)
+- 브라우저 콘솔에 **CSP 위반이 없는지** — 차트가 뜨고 로그인이 되는지로 확인.
+  CSP는 화면에 에러를 안 띄우고 콘솔에만 찍혀서 조용히 깨집니다.
+
+발급이 반복 실패하면 Let's Encrypt 한도에 걸립니다. 설정을 실험하는 중이라면
+`server/Caddyfile` 맨 아래 staging 블록의 주석을 풀고 시험하세요.
 
 ## 재부팅돼도 자동으로 켜지게 (systemd)
 
