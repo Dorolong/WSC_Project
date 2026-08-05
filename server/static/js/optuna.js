@@ -41,7 +41,7 @@ export async function refreshStatus() {
 export async function resumeMyRun() {
   if (!getAccessToken()) return;
   try {
-    const res = await fetch("/api/my-active-run", { headers: apiHeaders() });
+    const res = await fetch("/api/my-active-run", { headers: await apiHeaders() });
     const data = await res.json();
     if (!data.run_id) return;
     myRunId = data.run_id;
@@ -72,7 +72,7 @@ async function startRun() {
   try {
     const res = await fetch("/api/runs", {
       method: "POST",
-      headers: apiHeaders(),
+      headers: await apiHeaders(),
       body: JSON.stringify({ n_trials: nTrials }),
     });
     if (!res.ok) {
@@ -94,7 +94,7 @@ async function startRun() {
 async function pollMyRun() {
   if (!myRunId) return;
   try {
-    const res = await fetch(`/api/runs/${myRunId}`, { headers: apiHeaders() });
+    const res = await fetch(`/api/runs/${myRunId}`, { headers: await apiHeaders() });
     const data = await res.json();
     const statusEl = document.getElementById("myRunStatus");
     const text = document.getElementById("myRunText");

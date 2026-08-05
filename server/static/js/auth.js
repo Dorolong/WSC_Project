@@ -1,5 +1,5 @@
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../sync-config.js";
-import { setAccessToken } from "./state.js";
+import { setAccessToken, setTokenProvider } from "./state.js";
 import { resumeMyRun, refreshStatus } from "./optuna.js";
 
 let supabaseClient = null;
@@ -14,6 +14,15 @@ async function getClient() {
   if (supabaseClient) return supabaseClient;
   const mod = await import("https://esm.sh/@supabase/supabase-js@2");
   supabaseClient = mod.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // API 호출 때마다 "지금 유효한 토큰"을 꺼내갈 수 있게 등록한다.
+  // 로그인 시점의 토큰을 붙잡아두면 1시간 뒤 만료되어 이후 호출이
+  // 전부 401이 된다 - state.js의 apiHeaders() 주석 참고.
+  setTokenProvider(async () => {
+    const { data } = await supabaseClient.auth.getSession();
+    return data.session ? data.session.access_token : null;
+  });
+
   return supabaseClient;
 }
 

@@ -57,14 +57,14 @@ async function finishRun(data) {
   document.getElementById("simAnalysis").textContent = analysisText(result);
   document.getElementById("simResultCard").hidden = false;
 
-  await renderSimulationChart(simRunId, apiHeaders());
+  await renderSimulationChart(simRunId, await apiHeaders());
   document.getElementById("simCsvBtn").hidden = false;
   document.getElementById("simSaveBtn").hidden = false;
 }
 
 async function downloadCsv() {
   if (!simRunId) return;
-  const res = await fetch(`/api/sim/runs/${simRunId}/csv`, { headers: apiHeaders() });
+  const res = await fetch(`/api/sim/runs/${simRunId}/csv`, { headers: await apiHeaders() });
   if (!res.ok) throw new Error("CSV is not ready.");
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -78,7 +78,7 @@ async function downloadCsv() {
 async function pollSimulation() {
   if (!simRunId) return;
   try {
-    const res = await fetch(`/api/sim/runs/${simRunId}`, { headers: apiHeaders() });
+    const res = await fetch(`/api/sim/runs/${simRunId}`, { headers: await apiHeaders() });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Simulation status failed.");
 
@@ -125,7 +125,7 @@ async function startSimulation() {
     lastParams = {};
     const res = await fetch("/api/sim/runs", {
       method: "POST",
-      headers: apiHeaders(),
+      headers: await apiHeaders(),
       body: JSON.stringify({ cfg: lastCfg, params: lastParams }),
     });
     const data = await res.json();
