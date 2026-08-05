@@ -14,7 +14,7 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 > | 문서 | 역할 |
 > |---|---|
 > | `README.md` | 전체 요약 — 구조·원리·현재 상태·다음 할 일 (**여기서 시작**) |
-> | `progress/42_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
+> | `progress/44_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
 > | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
 > | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
 > | `SETUP.md` | 다른 컴퓨터에서 환경 재현하는 방법 |
@@ -25,8 +25,21 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 
 ## 1. 시스템 구조
 
-프로젝트는 **앱 2개 + 공용 계산 엔진**으로 구성됩니다. 두 앱은 같은 Supabase
-프로젝트를 공유해서 계정과 결과가 이어집니다.
+두 가지를 나란히 둡니다 — **지금 돌아가는 구조**와 **바뀔 구조**입니다.
+
+> ⚠️ **전환 계획 진행 중**
+> Streamlit Cloud를 접고 오라클 서버 하나로 통합하는 작업이 계획돼 있습니다
+> (**Phase 0·1 완료**, Phase 2~6 남음). 상세:
+> [`progress/43`](progress/43_웹통합_HTML전환_계획.txt) ·
+> 실행 지시서: [`docs/codex_web_migration_tasks.txt`](docs/codex_web_migration_tasks.txt)
+>
+> **Phase 6이 완료되면 아래 「1-1. 현재 구조」 절을 통째로 삭제하고,
+> 「1-2. 변경 예정 구조」를 정식 구조로 승격시킬 것.**
+
+### 1-1. 현재 구조 〔Phase 6 완료 시 이 절 삭제 예정〕
+
+지금 실제로 돌아가는 구조입니다. **앱 2개 + 공용 계산 엔진**으로 구성되고,
+두 앱은 같은 Supabase 프로젝트를 공유해서 계정과 결과가 이어집니다.
 
 ```mermaid
 flowchart TB
@@ -61,7 +74,53 @@ flowchart TB
 | 웹 앱 | [`app.py`](app.py) | Streamlit UI, 로그인, 결과 저장/조회 |
 | 탐색 서버 | [`server/`](server/) | FastAPI 런처 + 별도 프로세스 탐색 실행 |
 
-### 설계 원칙 두 가지
+### 1-2. 변경 예정 구조 〔Phase 6 완료 후 이 절이 정식 구조〕
+
+**아직 구현되지 않았습니다.** 오라클 서버 하나가 프론트와 API를 모두 서빙하고,
+Streamlit은 사라집니다. 프론트와 API가 **같은 도메인**이라 CORS가 필요 없습니다.
+
+```mermaid
+flowchart TB
+    subgraph OC["오라클 클라우드 — 단일 서버 · 단일 도메인"]
+        FE["server/static/ (HTML + CSS + JS)<br/>로그인 게이트 → 내부 셸<br/>시뮬레이터 · Optuna · 기록 · 설정"]
+        API["server/main.py (FastAPI)<br/>시뮬레이션 API + Optuna 런처<br/>대기열 · 진행률 · 로깅"]
+        SIM["server/sim_runner.py<br/>시뮬레이션 1회 (서브프로세스)"]
+        STU["server/study_runner.py<br/>Optuna N trial (서브프로세스)"]
+    end
+    subgraph ENG["공용 계산 엔진 — 변경 없음"]
+        SER["shared/cfg_serde.py<br/>cfg 직렬화 / 역직렬화"]
+        CFG["Configs/Vehicle_Params.py<br/>build_default_cfg()"]
+        FN["Functions/Vehicle_Function.py<br/>run_simulation()"]
+        MPC["mpc/mpc_controller.py<br/>mpc_speed()"]
+        OPT["scripts/main.py<br/>build_objective()"]
+    end
+    DB[("Supabase<br/>Auth · simulation_runs<br/>user_settings · optuna_runs")]
+
+    FE -->|"fetch (same-origin, CORS 불필요)"| API
+    API --> SIM
+    API --> STU
+    SIM --> ENG
+    STU --> ENG
+    FE <--> DB
+    API <--> DB
+    OPT --> FN --> MPC
+    CFG --> FN
+    SER --> CFG
+```
+
+**현재 대비 바뀌는 것**
+
+| 항목 | 현재 (1-1) | 변경 후 (1-2) |
+|---|---|---|
+| 앱 개수 | 2개 (Streamlit Cloud + 오라클) | **1개** (오라클) |
+| 프론트엔드 | Streamlit (Python) | **HTML + CSS + JS** |
+| 시뮬레이션 실행 | 앱 프로세스 안에서 직접 | **서브프로세스 + 진행률 폴링** |
+| CORS | `allow_origins=["*"]` | **불필요** (same-origin) |
+| 로그 | 없음 (`DEVNULL`로 버려짐) | 요청·실행 이력·에러 (총 200MB 상한) |
+| 경로 애니메이션 | 진행률과 무관한 장식용 반복 | **실제 진행률 반영** |
+| 계산 엔진 | Python 공용 모듈 | **동일** — 손대지 않고 그대로 재사용 |
+
+### 설계 원칙 두 가지 〔두 구조 공통〕
 
 **① 설정은 전역이 아니라 `cfg` 인자로 전달한다.**
 모든 설정값(`physics`/`solar`/`cell`/`pack`/`power`/`drive`/`race`/`simpara`)은
@@ -71,6 +130,12 @@ Cloud는 여러 사용자가 **서버 프로세스 하나를 공유**하기 때�
 실제로 이 버그가 두 번 발생했고(`progress/28`, `progress/36`) 둘 다 수정됐습니다.
 **`run_simulation()`/`mpc_speed()`를 직접 호출하는 코드를 새로 쓸 때는 최신
 시그니처(`cfg`/`const` 인자)를 반드시 확인하세요.**
+
+> 🔒 **이 원칙은 Streamlit을 걷어내도 그대로 유효합니다.**
+> FastAPI 서버도 여러 사용자가 프로세스 하나를 공유하는 건 똑같습니다(오히려
+> 스레드/async가 섞여 더 까다롭습니다). "Streamlit 때문에 만든 패턴"으로 오해해서
+> 마이그레이션 중에 `cfg` 인자를 걷어내면 `progress/28`·`36`의 버그가 그대로
+> 되살아납니다. **전역 싱글턴으로 되돌리지 마세요.**
 
 **② 탐색 공간은 한 곳에서만 정의한다.**
 웹 런처가 `scripts/main.py`의 `build_objective()`를 import해서 씁니다. CLI로
@@ -138,6 +203,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 | 2 | Rule-based MPC (LV1~LV5 ramp + LV8 페이스 블렌딩) | **완료** |
 | 3 | Streamlit 시뮬레이터 UI | **완료** |
 | 4 | 웹 배포 (Streamlit Cloud + Supabase + Optuna 런처) | **완료**(런처 실기동 검증 전) |
+| 4-1 | 웹 통합 / HTML 전환 (`progress/43`) | **진행 중** — Phase 0·1 완료 / 2~6 남음 |
 | 5 | MPC 물리 building block (코스팅/제동/내리막 캡) | **진행 중** |
 | 6 | 비용함수 기반 MPC로 전환 | 설계 논의만 완료 |
 | 7 | AI 예측 모델 (발전량 / 소비전력) — `ai_models/` | 미착수 |
@@ -179,7 +245,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 
 ## 4. 다음에 할 일
 
-> 자세한 내용은 [`progress/42_향후_개선_과제_백로그.txt`](progress/42_향후_개선_과제_백로그.txt)
+> 자세한 내용은 [`progress/44_향후_개선_과제_백로그.txt`](progress/44_향후_개선_과제_백로그.txt)
 
 ### 1순위 — Optuna 웹 런처 실제 동작 검증
 서버 코드가 인터넷 없는 환경에서 작성돼 **한 번도 실제로 띄워본 적이 없습니다.**
@@ -190,7 +256,41 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 - [ ] 배포본에서 자동 로그인·코드 보기 동작 확인
 - [ ] 문제 없으면 systemd 등록 ([`server/README.md`](server/README.md) 절차)
 
-### 2순위 — MPC 물리 building block 완성
+### 2순위 (트랙 A) — 웹 통합 / HTML 전환 (**Phase 0·1 완료, 2~6 남음**)
+> 트랙 A와 B는 서로 독립적입니다. 어느 쪽을 먼저 할지는 사용자 판단.
+Streamlit UI를 HTML/CSS/JS + FastAPI로 전환하고 Optuna 런처와 한 웹으로 합칩니다.
+**결정적 이유는 "다른 HTML 기반 웹과 합칠 예정"이라는 통합 제약**입니다
+(Streamlit은 외부 사이트에 iframe으로만 넣을 수 있음). 시인성 개선과 서버 로그는
+부차적 이유입니다. 전환 중에도 **Streamlit에 같은 UI 개선을 병행 적용**해서
+팀원 사용 경험이 안 깨지게 합니다.
+- 구조: 로그인 게이트 → 내부 셸(시뮬레이터 | Optuna | 기록 | 설정)
+- Phase 0(로깅) → 1(셸+게이트) → 2(시뮬 API) → 3(시뮬 프론트) → 4(차량제원 모달)
+  → 5(부가) → 6(전환·정리)
+- ✅ **Phase 0 완료** (PR #1) — `server/logging_conf.py` 신설, 요청/실행 로그,
+  자식 프로세스 출력을 `outputs/logs/run_{id}.log`로 보존(`DEVNULL` 제거)
+- ✅ **Phase 1 완료** (PR #1) — `static/`을 `css/tokens.css` + `js/`(auth·nav·
+  optuna·state)로 분리, 로그인 게이트 선배치. Streamlit도 병행 적용(v1.0.9,
+  비로그인 시 `render_login_gate()` + `st.stop()`)
+- ▶ **다음: Phase 2 (시뮬레이션 API)** — `shared/cfg_serde.py` 분리,
+  `server/sim_runner.py` 신설, `WSC_MAX_SIM_CONCURRENT` 슬롯 분리, 결과 CSV TTL
+- ⚠️ 1순위(런처 실기동 검증)는 **여전히 미완** — Phase 2부터는 실제 실행 검증
+  (A/B 동등성 `V2-4`)이 필요하므로 이때는 서버가 실제로 떠야 합니다
+- 상세 설계·주의사항·미해결 질문은
+  [`progress/43_웹통합_HTML전환_계획.txt`](progress/43_웹통합_HTML전환_계획.txt)
+- 실행용 지시서(Phase별 검증 조건·단계 게이트)는
+  [`docs/codex_web_migration_tasks.txt`](docs/codex_web_migration_tasks.txt)
+  — Codex 등 다른 에이전트에 작업을 넘길 때 이 파일을 전달
+- 합칠 웹: 레포 밖 별개 사이트, HTML+CSS+JS+FastAPI, **오라클과 같은 도메인**
+  (인증은 Supabase 유지) → **CORS 비이슈**. 그 사이트 디자인을 가져오고
+  오라클이 시뮬레이터+Optuna를 둘 다 서빙
+- 디자인 기준: **색은 기존 Optuna 페이지 팔레트**(녹색 `#2F6F4E` 계열),
+  레이아웃·정보 구조는 현재 Streamlit과 유사하게. 디자인 자산을 기다리지 않고
+  "임의 구성 후 수정" 방식 — 단 색·간격은 전부 `tokens.css`의 CSS 변수로만
+  정의해야 나중 교체가 싸다 (검증 `V1-5d`가 grep으로 기계 검사)
+- 🔒 **Streamlit은 Phase 6까지 유지** — `app.py`는 지금도 살아있고 팀원이 씁니다.
+  Phase별 `[B]` 트랙으로 같은 UI 개선을 병행 적용 중
+
+### 2순위 (트랙 B) — MPC 물리 building block 완성
 설계는 `progress/22`에 완료돼 있고 코드만 없는 상태입니다.
 - [x] 내리막 세그먼트 경계 배열 추출 (`scripts/main.py` 112~130줄)
       — 단, 아래 `compute_downhill_cap()`이 없어 **현재는 계산만 하고 미사용**
