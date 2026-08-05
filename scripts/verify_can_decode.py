@@ -1,7 +1,8 @@
 """Verify the project CAN data byte-order rule against canlog.csv.
 
 Usage:
-    python scripts/verify_can_decode.py path/to/canlog.csv
+    python scripts/verify_can_decode.py                 # specs/canlog.csv 사용
+    python scripts/verify_can_decode.py path/to/other.csv
 
 Expected Phase 1 result:
     reversed/LE should be at least 87.7% accurate, and non-reversed parsing
@@ -14,7 +15,13 @@ import argparse
 import csv
 import math
 import struct
+import sys
 from pathlib import Path
+
+# 저장소 루트를 import 경로에 추가한다. 이게 없으면 저장소 루트에서
+# `python scripts/verify_can_decode.py ...` 로 돌릴 때 telemetry 패키지를
+# 못 찾는다(scripts/main.py 도 같은 방식을 쓴다).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from telemetry.decode import close_float, decode_canlog_data_hex
 
@@ -66,7 +73,9 @@ def _score(rows, *, reverse: bool, fmt: str):
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("path", type=Path)
+    # 인자를 안 주면 저장소에 커밋된 샘플 로그를 쓴다.
+    parser.add_argument("path", type=Path, nargs="?",
+                        default=Path(__file__).resolve().parents[1] / "specs" / "canlog.csv")
     parser.add_argument("--min-accuracy", type=float, default=87.7)
     parser.add_argument("--max-no-reverse", type=float, default=15.0)
     args = parser.parse_args()

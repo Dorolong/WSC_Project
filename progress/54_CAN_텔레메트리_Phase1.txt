@@ -70,6 +70,34 @@ motor_eff, P_LV 같은 물리 상수는 이번 작업에서 건드리지 않았�
   서버 실행이 불가하다.
 - V-g: 실행 못 함. 로컬 Python 부재로 기존 Simulation/Optuna 회귀 실행 불가.
 
+[검증 - 2026-08-05 Claude 세션에서 대신 수행]
+원 작업 세션이 Python 부재로 실행하지 못한 항목을 다른 컴퓨터에서 실행했다.
+- py_compile: telemetry/decode.py, signals.py, server/telemetry_runner.py,
+  server/main.py, scripts/can_signals_from_xlsx.py, verify_can_decode.py 전부 통과.
+- V-a 통과: canlog.csv 41,397행 대조 결과 reversed/LE 36,322행 = **87.74%**.
+  지시서가 요구한 87.7% 이상을 만족하고, 사전에 확정한 값과 정확히 일치한다.
+  샘플 대조도 4000.0 / 0.543333 까지 맞다.
+- V-b 통과: 잘못된 해석 3종(reversed/BE, printed/LE, printed/BE)이 전부
+  14.2~14.3%로, 기준(15% 미만)을 만족한다. 검사가 실제로 판별력이 있다.
+- 신호 로더 동작 확인: load_signal_defs() 108행, primary_signals() 17개.
+- V-d/V-e/V-f/V-g는 여전히 미실행(Supabase 실행·서버 배포 후에야 가능).
+
+[이번에 같이 고친 것 - 2026-08-05]
+- scripts/verify_can_decode.py 가 자기 docstring 의 사용법대로 실행되지 않았다
+  (sys.path 설정이 없어 `python scripts/verify_can_decode.py` 시
+  ModuleNotFoundError: No module named 'telemetry'). scripts/main.py 와 같은
+  방식으로 저장소 루트를 sys.path 에 추가했고, 인자를 생략하면
+  specs/canlog.csv 를 쓰도록 기본값을 넣었다.
+- specs/canlog.csv 추가(4.2MB, origin/feature/ocs 에서 가져옴). 검증 기준이
+  이 파일에 걸려 있는데 main 브랜치에 없어서 원 세션이 검증을 못 한 원인 중
+  하나였다. 이제 저장소만 받으면 누구나 검증을 재현할 수 있다.
+
+[알려진 차이 - 미해결]
+specs/can_signals.csv 가 **108행**인데 specs 엑셀의 "전체 요약"은 **114개**다.
+BMS(HV) 가 60행으로 명세의 66개보다 **6개 적다**(MPPT 21 / Motor 13 /
+BMS(LV) 14 는 일치). 어느 6개가 왜 빠졌는지 엑셀 원본과 대조가 필요하다.
+원 작업 기록에는 "108개 생성"으로만 적혀 있고 명세 개수와 대조하지 않았다.
+
 [배포 필요]
 Supabase에서 `docs/supabase_telemetry_phase1.sql` 실행 후 Oracle 서버에서
 `git pull`, `pip install -r server/requirements.txt`, `sudo systemctl restart wsc-launcher`
