@@ -14,7 +14,7 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 > | 문서 | 역할 |
 > |---|---|
 > | `README.md` | 전체 요약 — 구조·원리·현재 상태·다음 할 일 (**여기서 시작**) |
-> | `progress/53_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
+> | `progress/55_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
 > | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
 > | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
 > | `docs/구조도.html` | **시스템 구조 한 장 요약** — 단면도·요청 경로·이해도 지형 (브라우저로 열기) |
@@ -85,10 +85,11 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph OC["오라클 클라우드 — 단일 서버 · 단일 도메인"]
-        FE["server/static/ (HTML + CSS + JS)<br/>로그인 게이트 → 내부 셸<br/>시뮬레이터 · Optuna · 기록 · 설정"]
-        API["server/main.py (FastAPI)<br/>시뮬레이션 API + Optuna 런처<br/>대기열 · 진행률 · 로깅"]
+        FE["server/static/ (HTML + CSS + JS)<br/>로그인 게이트 → 내부 셸<br/>시뮬레이터 · Optuna · 텔레메트리 · 기록 · 설정"]
+        API["server/main.py (FastAPI)<br/>시뮬레이션 API + Optuna 런처 + CAN 로그 업로드<br/>대기열 · 진행률 · 로깅"]
         SIM["server/sim_runner.py<br/>시뮬레이션 1회 (서브프로세스)"]
         STU["server/study_runner.py<br/>Optuna N trial (서브프로세스)"]
+        TEL["server/telemetry_runner.py<br/>CAN 로그 파싱 (서브프로세스)"]
     end
     subgraph ENG["공용 계산 엔진 — 변경 없음"]
         SER["shared/cfg_serde.py<br/>cfg 직렬화 / 역직렬화"]
@@ -97,11 +98,12 @@ flowchart TB
         MPC["mpc/mpc_controller.py<br/>mpc_speed()"]
         OPT["scripts/main.py<br/>build_objective()"]
     end
-    DB[("Supabase<br/>Auth · simulation_runs<br/>user_settings · optuna_runs")]
+    DB[("Supabase<br/>Auth · simulation_runs<br/>user_settings · optuna_runs<br/>telemetry_logs · telemetry_frames")]
 
     FE -->|"fetch (same-origin, CORS 불필요)"| API
     API --> SIM
     API --> STU
+    API --> TEL
     SIM --> ENG
     STU --> ENG
     FE <--> DB
@@ -211,7 +213,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 | 6 | 비용함수 기반 MPC로 전환 | 설계 논의만 완료 |
 | 7 | AI 예측 모델 (발전량 / 소비전력) — `ai_models/` | 미착수 |
 | 8 | 강화학습 실험 — `rl/` | 미착수 |
-| 9 | 실측 데이터 교체 | 미착수 |
+| 9 | 실측 데이터 교체 / CAN 텔레메트리 축 | **Phase 1 구현** — 업로드·파싱·조회, 물리 상수 교체는 보류 |
 
 ### 최근 완료된 것
 
@@ -236,6 +238,9 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 - **[버그 수정] `mpc_controller.py`의 `simpara` 전역 참조 제거** — 속도 댐퍼가 세션
   `cfg`가 아니라 모듈 전역을 읽고 있어 사용자가 `max_v_delta`를 바꿔도 조용히
   무시되던 문제. 전 구간 시뮬레이션 A/B로 반영 확인 (`progress/36`)
+- **CAN 텔레메트리 Phase 1** — 실차 CAN 로그 업로드/파싱/신호 시계열 조회 축을
+  통합 웹에 추가. 물리 상수 교체는 하지 않고, 원본 raw bytes와 검증용 float segment를
+  Supabase에 저장하는 단계까지 구현 (`progress/54`)
 - **`scripts/main.py` 재구성** — `build_objective()` / `run_best_params_simulation()`
   / `run_cli()`로 분리해 CLI와 웹 런처가 같은 탐색 공간 코드를 공유 (`progress/34`)
 - **차량 제원 계정 저장/불러오기**, **릴리즈 노트 + 첫 로그인 튜토리얼**,
@@ -248,7 +253,7 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 
 ## 4. 다음에 할 일
 
-> 자세한 내용은 [`progress/53_향후_개선_과제_백로그.txt`](progress/53_향후_개선_과제_백로그.txt)
+> 자세한 내용은 [`progress/55_향후_개선_과제_백로그.txt`](progress/55_향후_개선_과제_백로그.txt)
 
 ### ✅ 완료 — HTTPS 배포 ([`progress/48`](progress/48_HTTPS_실배포.txt))
 
@@ -266,11 +271,13 @@ GRANT 누락, 토큰 만료 401)을 찾아 고쳤습니다 — 상세는 `progre
 
 1. **Stop 버튼 실기동 검증/배포** — 오라클 서버에서 git pull + restart 후
    `WSC_CHECKPOINT_EVERY=2`, trial 3~5 로 V-a~V-h 확인
-2. **Supabase 키 환경변수화** — Stop 버튼 작업 머지 후 착수. 같은
+2. **Supabase SQL 실행 + 서버 배포 검증** — `docs/supabase_telemetry_phase1.sql` 실행 후
+   서버에서 git pull + restart, CAN 업로드 V-d~V-g 확인
+3. **Supabase 키 환경변수화** — 텔레메트리 Phase 1 머지 후 착수. 같은
    `server/main.py`를 건드리므로 동시 진행 금지
-3. **RLS/GRANT 전수 점검 + 스키마 SQL 문서화** — `optuna_runs`에서 GRANT 누락이
+4. **RLS/GRANT 전수 점검 + 스키마 SQL 문서화** — `optuna_runs`에서 GRANT 누락이
    실제로 났으므로, 3개 Supabase 테이블 스키마와 정책을 재현 가능한 SQL로 정리합니다
-4. 의존성 취약점 점검, 백업 계획 정리
+5. 의존성 취약점 점검, 백업 계획 정리
 
 회원가입 모달과 서버 재시작 시 실행 상태 복원은 이미 반영됐습니다.
 
@@ -390,9 +397,13 @@ Environment/        기상 데이터 수집 (Open-Meteo API)
 scripts/            CLI 실행 스크립트
   main.py             Optuna 파라미터 최적화 (build_objective()는 웹 런처도
                       import해서 재사용 - 탐색 공간 정의는 여기 한 곳뿐)
+telemetry/          실차 CAN 텔레메트리 파서/신호 정의 로더
+  decode.py           canlog.csv 바이트 역순 보정, UDP payload 순수 파서, raw bytes 보존
+  signals.py          specs/can_signals.csv 로더
 server/             Optuna 웹 런처 (오라클 서버에서만 구동, Streamlit과 별개)
   main.py             FastAPI - 인증/대기열/진행률 API + 정적 프론트 서빙
   study_runner.py     실제 탐색을 도는 별도 프로세스 (체크포인트·디스크 로테이션)
+  telemetry_runner.py CAN 로그를 스트리밍 파싱해 telemetry_logs/frames에 배치 저장
   static/index.html   로그인·실행·진행률 UI (순수 HTML/JS)
   wsc-launcher.service systemd 유닛 (재부팅 시 자동 기동)
   README.md           서버 배포 가이드

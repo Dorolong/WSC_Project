@@ -98,6 +98,13 @@ if "sim_running" not in st.session_state:
 # 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
 RELEASE_NOTES = [
     {
+        "version": "1.3.0",
+        "date": "2026-08-05",
+        "title": "CAN 텔레메트리 Phase 1 추가",
+        "details": "- 통합 웹에 CAN 로그 업로드와 신호 시계열 확인 탭 추가\n"
+                    "- 실차 데이터 교체 로드맵을 위해 CAN 파서, 신호 정의 CSV, Supabase 스키마 초안을 추가",
+    },
+    {
         "version": "1.2.0",
         "date": "2026-08-05",
         "title": "Optuna 탐색 중단 버튼 추가",

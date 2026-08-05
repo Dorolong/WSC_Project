@@ -2,6 +2,7 @@ import { initAuth, onAuthenticated } from "./auth.js";
 import { initAuxiliary } from "./auxiliary.js";
 import { initOptuna } from "./optuna.js";
 import { initSimulator, setVehicleConfigProvider } from "./simulator.js";
+import { initTelemetry } from "./telemetry.js";
 import { getVehicleConfig, initVehicleConfig } from "./vehicle-config.js";
 
 const views = {
@@ -12,6 +13,10 @@ const views = {
   optuna: {
     tab: document.getElementById("tabOptuna"),
     panel: document.getElementById("optunaView"),
+  },
+  telemetry: {
+    tab: document.getElementById("tabTelemetry"),
+    panel: document.getElementById("telemetryView"),
   },
 };
 
@@ -26,6 +31,7 @@ function activateView(name) {
 function initNav() {
   views.simulator.tab.addEventListener("click", () => activateView("simulator"));
   views.optuna.tab.addEventListener("click", () => activateView("optuna"));
+  views.telemetry.tab.addEventListener("click", () => activateView("telemetry"));
   activateView("simulator");
 }
 
@@ -41,6 +47,7 @@ onAuthenticated(() => {
     .then(() => {
       setVehicleConfigProvider(getVehicleConfig);
       initSimulator();
+      initTelemetry();
     })
     .catch((e) => {
       document.getElementById("simErr").textContent = e.message;

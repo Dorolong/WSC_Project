@@ -59,6 +59,7 @@
       <div class="view-tabs" role="tablist" aria-label="Views">
         <button class="tab is-active" id="tabSimulator" type="button">Simulator</button>
         <button class="tab" id="tabOptuna" type="button">Optuna Search</button>
+        <button class="tab" id="tabTelemetry" type="button">Telemetry</button>
       </div>
 
       <section class="dashboard-grid" id="simulatorView">
@@ -130,6 +131,42 @@
           <div id="myRunResult" class="result-box" hidden></div>
         </article>
       </section>
+
+      <section class="dashboard-grid" id="telemetryView" hidden>
+        <article class="card run-card">
+          <div class="status-row">
+            <strong>CAN Log Upload</strong>
+            <span id="telemetryStatus" class="soft-text">Ready.</span>
+          </div>
+          <div class="telemetry-controls">
+            <input type="file" id="telemetryFile" accept=".csv,text/csv" />
+            <button class="btn" id="telemetryUploadBtn" type="button">Upload Log</button>
+          </div>
+          <div class="bar-track"><div class="bar-fill" id="telemetryBar"></div></div>
+          <p class="hint" id="telemetryText">canlog.csv files are parsed in the background.</p>
+          <p class="err" id="telemetryErr"></p>
+        </article>
+
+        <article class="card">
+          <div class="status-row">
+            <strong>My Logs</strong>
+            <button class="link-button" id="telemetryRefreshBtn" type="button">Refresh</button>
+          </div>
+          <div id="telemetryLogList" class="list-block"></div>
+        </article>
+
+        <article class="card progress-card" id="telemetryChartCard" hidden>
+          <div class="status-row">
+            <strong id="telemetryChartTitle">Signal Series</strong>
+            <span id="telemetryFrameCount" class="soft-text"></span>
+          </div>
+          <div class="signal-row">
+            <label for="telemetrySignalSelect">Signal</label>
+            <select id="telemetrySignalSelect"></select>
+          </div>
+          <div id="telemetryChart" class="chart-box"></div>
+        </article>
+      </section>
     </section>
   </main>
 </div>
@@ -187,6 +224,6 @@
 </dialog>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-<script type="module" src="./js/nav.js?v=20260805-run-restore"></script>
+<script type="module" src="./js/nav.js?v=20260805-telemetry-phase1"></script>
 </body>
 </html>

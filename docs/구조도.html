@@ -213,7 +213,7 @@
       아래는 그 시스템이 실제로 어떤 조각들로 되어 있는지의 단면도다.
     </p>
     <div class="meta">
-      <span><b>v1.1.2</b> 배포 중</span>
+      <span><b>v1.3.0</b> 배포 준비</span>
       <span>앱 <b>2벌</b> + 공용 엔진</span>
       <span>파이썬 <b>약 3,300줄</b> · 프론트 <b>약 1,600줄</b></span>
       <span>기준일 <b>2026-08-05</b></span>
@@ -236,7 +236,7 @@
           <div class="box accent-slate">
             <h3>통합 웹 <span class="chip slate">본체</span></h3>
             <p class="path">server/static/</p>
-            <p>정적 HTML + 바닐라 JS 8모듈. 시뮬레이터·Optuna·기록·설정이 한 화면 안에 탭으로.</p>
+            <p>정적 HTML + 바닐라 JS 모듈. 시뮬레이터·Optuna·텔레메트리·기록·설정이 한 화면 안에 탭으로.</p>
           </div>
           <div class="box accent-amber">
             <h3>Streamlit 앱 <span class="chip amber">legacy</span></h3>
@@ -257,7 +257,7 @@
         <div class="tier-body">
           <div class="box accent-green">
             <h3>FastAPI 런처 <span class="chip green">오라클 클라우드</span></h3>
-            <p class="path">server/main.py · 854줄 &nbsp;·&nbsp; sim_runner.py 200 &nbsp;·&nbsp; study_runner.py 237</p>
+            <p class="path">server/main.py &nbsp;·&nbsp; sim_runner.py &nbsp;·&nbsp; study_runner.py &nbsp;·&nbsp; telemetry_runner.py</p>
             <p>
               인증 검증 · 대기열 · 진행률 · 상태 영속화. 무거운 계산은 <b>별도 프로세스로 분리</b>해서 돌린다 —
               GIL 때문에 스레드로는 진짜 병렬이 안 되고, 블로킹 호출이 다른 사람 요청까지 막기 때문.
@@ -300,7 +300,7 @@
         <div class="tier-body split-2">
           <div class="box accent-slate">
             <h3>Supabase</h3>
-            <p>계정 · 시뮬레이션 기록 · 차량 제원 · Optuna 탐색 결과. 네 테이블 모두 <b>본인 행만</b> 보이도록 잠겨 있다.</p>
+            <p>계정 · 시뮬레이션 기록 · 차량 제원 · Optuna 탐색 결과 · CAN 로그. 사용자 데이터는 <b>본인 행만</b> 보이도록 잠겨 있다.</p>
           </div>
           <div class="box accent-slate">
             <h3>파일</h3>
@@ -314,11 +314,11 @@
         <div class="tier-label">신규 축</div>
         <div class="tier-body">
           <div class="box planned accent-amber">
-            <h3>텔레메트리 <span class="chip amber">계획 · 미착수</span></h3>
+            <h3>텔레메트리 <span class="chip amber">Phase 1 구현</span></h3>
             <p>
-              실차 CAN 데이터를 받아 저장·표시하는 축. ArrowPoint(Java/Spring)에서
-              <b>값 디코딩 규칙과 데이터 모델 구조만 차용</b>하고 수집기는 파이썬으로 새로 만든다.
-              <b>선결 조건 — 실제 차량의 CAN 매핑</b>(원본 저장소의 정의값은 더미).
+              실차 CAN 로그를 업로드해 raw bytes를 보존하고 신호별 시계열을 확인하는 축. Phase 1에서는
+              <b>데이터를 받고 보는 것</b>까지만 구현했고, 물리 상수 교체는 후속 단계로 남겼다.
+              Phase 2에서는 같은 파서에 UDP 수신부를 붙인다.
             </p>
           </div>
         </div>

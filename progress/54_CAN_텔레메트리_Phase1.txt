@@ -1,0 +1,81 @@
+================================================================
+CAN 텔레메트리 축 Phase 1 구현 기록 (2026-08-05)
+================================================================
+
+[배경]
+README 로드맵의 마지막 단계인 "실측 데이터 교체"를 위한 새 축을 시작했다.
+이번 Phase 1의 범위는 대시보드 완성이 아니라 CAN 로그를 업로드하고, 원본 raw
+bytes를 보존한 채 신호 단위로 조회할 수 있는 기반을 만드는 것이다. Regen_eff,
+motor_eff, P_LV 같은 물리 상수는 이번 작업에서 건드리지 않았다.
+
+[구현]
+- `telemetry/decode.py`
+  - canlog.csv의 data 컬럼이 바이트 역순으로 출력되는 규칙을 반영해
+    `decode_canlog_data_hex()`에서 `bytes.fromhex(...)[::-1]`을 적용한다.
+  - `decode_frame()`은 raw bytes를 `raw_data_hex`로 보존하고, 8바이트 이상일 때만
+    검증용 `seg_one`/`seg_two` float32 값을 계산한다.
+  - Phase 2 UDP 수신부가 재사용할 수 있도록 `parse_udp_packet()`을 순수 함수로
+    분리했다. UDP 소켓 수신은 구현하지 않았다.
+- `telemetry/signals.py`
+  - `specs/can_signals.csv` 로더와 PRIMARY 신호 필터를 추가했다.
+- `specs/can_signals.csv`
+  - `specs/CAN_수신_데이터_정리본.xlsx`를 읽기 전용 ZIP/XML 방식으로 변환했다.
+  - 108개 CAN ID 행을 생성했다.
+  - Motor와 BMS(LV)는 잠정 상태로 표시했다.
+  - 필드가 3개 이상이거나 자동 타입 추출이 애매한 항목은 note에 확인 필요를 남겼다.
+- `scripts/can_signals_from_xlsx.py`
+  - 같은 변환을 다른 컴퓨터에서 재현할 수 있게 Python 스크립트로 추가했다.
+  - openpyxl로 저장하지 않고 XLSX 내부 XML만 읽는다.
+- `scripts/verify_can_decode.py`
+  - 임시 절대경로 하드코딩을 제거하고, canlog.csv 경로를 인자로 받게 바꿨다.
+  - reversed/LE 정확도와 non-reversed/LE 역검증을 함께 출력한다.
+- `server/telemetry_runner.py`
+  - 업로드된 canlog.csv를 스트리밍 파싱하고 Supabase `telemetry_logs`,
+    `telemetry_frames`에 배치 저장한다.
+  - 업로드 파일은 파싱 후 삭제한다.
+- `server/main.py`
+  - `/api/telemetry/logs` 업로드 API 추가.
+  - `/api/telemetry/logs`, `/api/telemetry/logs/{id}`,
+    `/api/telemetry/logs/{id}/series`, `/api/telemetry/signals` 추가.
+  - 기존 Optuna/Simulation 큐와 상태 저장 패턴을 재사용해 telemetry queue/run 상태를
+    `outputs/runs_state.json`에 같이 저장한다.
+  - access token은 상태 파일에 저장하지 않는다. 서버 재시작으로 토큰이 사라진
+    queued/running telemetry 작업은 안전하게 interrupted/lost로 표시한다.
+- `server/static/`
+  - Telemetry 탭 추가.
+  - CSV 업로드, 파싱 상태 폴링, 내 로그 목록, PRIMARY 신호 선택, Plotly 시계열 차트
+    UI를 추가했다.
+  - CSS 색상/간격은 기존 `tokens.css` 변수만 사용했다.
+- `docs/supabase_telemetry_phase1.sql`
+  - `telemetry_logs`, `telemetry_frames` 테이블, index, RLS, GRANT, policy를 작성했다.
+  - SQL 실행은 사용자가 Supabase SQL editor에서 해야 한다.
+- `server/requirements.txt`
+  - FastAPI multipart 업로드에 필요한 `python-multipart` 추가.
+- `README.md`, `server/README.md`, 릴리즈 노트
+  - 텔레메트리 축, 새 환경변수, v1.3.0 릴리즈 노트를 반영했다.
+
+[확인 필요로 남은 신호]
+- BMS(HV): 0x040, 0x042, 0x123, 0x044, 0x046, 0x223은 3개 이상 필드를 가진
+  프레임이라 Phase 1 CSV에는 앞 두 segment만 대표로 기록했다.
+- Motor: 전체 13개 행은 VCU 확정 전 WaveSculptor22 placeholder라 잠정.
+- BMS(LV): 전체 14개 행은 OrionBMS placeholder라 잠정.
+- Motor 0x408, 0x417은 reserved bytes 포함.
+
+[검증]
+- V-a/V-b: 실행 못 함. 현재 컴퓨터에 Python 실행기가 없고, 지시서의 canlog.csv
+  41,397행 파일이 저장소에 없다. 검증 스크립트는 인자 기반으로 고쳐 둠.
+- V-c: 코드 리뷰로 확인. `telemetry_frames.raw_data_hex`에 reversal 이후 원본 CAN data
+  bytes를 저장하고, seg_one/seg_two는 별도 컬럼으로만 저장한다.
+- V-d/V-e/V-f: 실행 못 함. Supabase SQL이 아직 실행되지 않았고 로컬 Python/FastAPI
+  서버 실행이 불가하다.
+- V-g: 실행 못 함. 로컬 Python 부재로 기존 Simulation/Optuna 회귀 실행 불가.
+
+[배포 필요]
+Supabase에서 `docs/supabase_telemetry_phase1.sql` 실행 후 Oracle 서버에서
+`git pull`, `pip install -r server/requirements.txt`, `sudo systemctl restart wsc-launcher`
+가 필요하다.
+
+[되돌리기]
+커밋 단위 revert가 가장 안전하다. Supabase SQL까지 적용했다면 배포 rollback 후
+`telemetry_frames`, `telemetry_logs` 테이블은 필요 시 별도 drop한다.
+================================================================

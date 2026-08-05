@@ -1,70 +1,113 @@
-"""canlog.csv로 CAN 데이터 값 변환 규칙을 확정한다.
+"""Verify the project CAN data byte-order rule against canlog.csv.
 
-Java 원본(CanPacket.java)은:
-    getDataSegmentOne() = data[0..3] 리틀엔디안 float32
-    getDataSegmentTwo() = data[4..7] 리틀엔디안 float32
+Usage:
+    python scripts/verify_can_decode.py path/to/canlog.csv
 
-로그의 data 컬럼은 8바이트를 하나의 hex 문자열로 찍은 것인데,
-바이트 순서를 어떻게 잡아야 로그의 float[0]/float[1]과 맞는지를
-여러 후보로 전부 시험해서 결정한다.
+Expected Phase 1 result:
+    reversed/LE should be at least 87.7% accurate, and non-reversed parsing
+    should stay below 15%.
 """
-import csv, struct, io, math
 
-PATH = r"C:\Users\DongHo\AppData\Local\Temp\claude\c--Users-DongHo-Desktop-WSC-DriveEff-Project\9afdb490-0403-4c72-a715-a4ad91c50aef\scratchpad\canlog.csv"
+from __future__ import annotations
 
-rows = []
-with io.open(PATH, encoding="utf-8", errors="replace") as f:
-    for r in csv.reader(f):
-        if len(r) < 8 or not r[4].strip().startswith("0x"):
-            continue
-        try:
-            data_hex = r[4].strip()[2:]
-            f1 = float(r[5]); f0 = float(r[6])
-        except ValueError:
-            continue
-        if len(data_hex) != 16:
-            continue
-        rows.append((data_hex, f1, f0))
+import argparse
+import csv
+import math
+import struct
+from pathlib import Path
 
-print(f"검증 대상 행: {len(rows):,}")
+from telemetry.decode import close_float, decode_canlog_data_hex
 
-def close(a, b):
-    if math.isnan(a) or math.isnan(b):
-        return math.isnan(a) and math.isnan(b)
-    if a == b:
-        return True
-    denom = max(abs(a), abs(b))
-    if denom == 0:
-        return abs(a - b) < 1e-30
-    return abs(a - b) / denom < 2e-6   # 로그가 6자리 유효숫자로 반올림돼 있음
 
-def cands(h):
-    raw = bytes.fromhex(h)               # 문자열 순서 그대로
-    rev = raw[::-1]                      # 64비트 값으로 보고 뒤집기
-    out = {}
-    for name, b in (("문자열순서", raw), ("역순", rev)):
-        for endian, fmt in (("LE", "<f"), ("BE", ">f")):
-            lo = struct.unpack(fmt, b[0:4])[0]
-            hi = struct.unpack(fmt, b[4:8])[0]
-            out[f"{name}/{endian}"] = (lo, hi)
-    return out
+def _read_rows(path: Path):
+    rows = []
+    with path.open(encoding="utf-8", errors="replace", newline="") as f:
+        for row in csv.reader(f):
+            if len(row) < 7 or not row[4].strip().lower().startswith("0x"):
+                continue
+            try:
+                data_hex = row[4].strip()
+                logged_seg_two = float(row[5])
+                logged_seg_one = float(row[6])
+            except ValueError:
+                continue
+            rows.append((data_hex, logged_seg_one, logged_seg_two))
+    return rows
 
-names = list(cands(rows[0][0]).keys())
-score = {n: [0, 0] for n in names}       # [f0=lo & f1=hi 로 맞음, f0=hi & f1=lo 로 맞음]
 
-for h, f1, f0 in rows:
-    for n, (lo, hi) in cands(h).items():
-        if close(lo, f0) and close(hi, f1):
-            score[n][0] += 1
-        if close(lo, f1) and close(hi, f0):
-            score[n][1] += 1
+def _segments(data: bytes, fmt: str):
+    return struct.unpack(fmt, data[0:4])[0], struct.unpack(fmt, data[4:8])[0]
 
-print(f"\n{'해석 방식':<18}{'float[0]=앞4B':>14}{'float[0]=뒤4B':>14}")
-print("-" * 46)
-for n in names:
-    a, b = score[n]
-    print(f"{n:<18}{a:>13,}{b:>14,}")
 
-best = max(((n, i, s) for n, sc in score.items() for i, s in enumerate(sc)), key=lambda x: x[2])
-print(f"\n결론: {best[0]}, float[0]={'앞 4바이트' if best[1]==0 else '뒤 4바이트'} "
-      f"→ {best[2]:,}/{len(rows):,} 행 일치 ({best[2]/len(rows)*100:.2f}%)")
+def _score(rows, *, reverse: bool, fmt: str):
+    matched = 0
+    samples = []
+    for data_hex, expected_one, expected_two in rows:
+        text = data_hex[2:] if data_hex.lower().startswith("0x") else data_hex
+        raw = bytes.fromhex(text)
+        data = raw[::-1] if reverse else raw
+        seg_one, seg_two = _segments(data, fmt)
+        ok = close_float(seg_one, expected_one) and close_float(seg_two, expected_two)
+        if ok:
+            matched += 1
+        if len(samples) < 5:
+            samples.append(
+                {
+                    "data": data_hex,
+                    "seg_one": seg_one,
+                    "expected_one": expected_one,
+                    "seg_two": seg_two,
+                    "expected_two": expected_two,
+                    "ok": ok,
+                }
+            )
+    return matched, samples
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path", type=Path)
+    parser.add_argument("--min-accuracy", type=float, default=87.7)
+    parser.add_argument("--max-no-reverse", type=float, default=15.0)
+    args = parser.parse_args()
+
+    rows = _read_rows(args.path)
+    if not rows:
+        raise SystemExit("no comparable rows found")
+
+    candidates = {
+        "reversed/LE": _score(rows, reverse=True, fmt="<f"),
+        "reversed/BE": _score(rows, reverse=True, fmt=">f"),
+        "printed/LE": _score(rows, reverse=False, fmt="<f"),
+        "printed/BE": _score(rows, reverse=False, fmt=">f"),
+    }
+    print(f"rows={len(rows):,}")
+    for name, (matched, _) in candidates.items():
+        pct = matched / len(rows) * 100
+        print(f"{name:12} {matched:7,}/{len(rows):,} {pct:6.2f}%")
+
+    correct, samples = candidates["reversed/LE"]
+    no_reverse, _ = candidates["printed/LE"]
+    correct_pct = correct / len(rows) * 100
+    no_reverse_pct = no_reverse / len(rows) * 100
+
+    print("samples:")
+    for sample in samples:
+        print(sample)
+
+    # Also assert that the public helper follows the same reversal rule.
+    first_data = decode_canlog_data_hex(rows[0][0])
+    if first_data != bytes.fromhex(rows[0][0].removeprefix("0x"))[::-1]:
+        raise SystemExit("decode_canlog_data_hex did not preserve the reversal rule")
+
+    if correct_pct < args.min_accuracy:
+        raise SystemExit(f"reversed/LE accuracy too low: {correct_pct:.2f}%")
+    if no_reverse_pct >= args.max_no_reverse:
+        raise SystemExit(f"printed/LE unexpectedly high: {no_reverse_pct:.2f}%")
+    if math.isnan(correct_pct):
+        raise SystemExit("invalid score")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

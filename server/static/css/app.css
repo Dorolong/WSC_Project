@@ -95,7 +95,9 @@ label {
 input[type="email"],
 input[type="password"],
 input[type="text"],
-input[type="number"] {
+input[type="number"],
+input[type="file"],
+select {
   width: 100%;
   min-height: var(--size-control-min);
   padding: 10px 12px;
@@ -216,6 +218,39 @@ input[type="number"] {
   gap: var(--space-md);
   align-items: end;
   margin-top: var(--space-sm);
+}
+
+.telemetry-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(140px, auto);
+  gap: var(--space-md);
+  align-items: end;
+  margin-top: var(--space-sm);
+}
+
+.signal-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 180px) minmax(220px, 1fr);
+  gap: var(--space-md);
+  align-items: center;
+  margin-top: var(--space-md);
+}
+
+.log-row {
+  width: 100%;
+  min-height: var(--size-control-min);
+  padding: var(--space-sm) 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-transparent);
+  color: var(--color-ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.log-row:hover {
+  color: var(--color-primary-dark);
 }
 
 .status-pill {
@@ -489,7 +524,9 @@ input[type="number"] {
 
   .topbar,
   .dashboard-grid,
-  .run-controls {
+  .run-controls,
+  .telemetry-controls,
+  .signal-row {
     grid-template-columns: 1fr;
   }
 

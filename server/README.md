@@ -129,6 +129,9 @@ sudo systemctl restart wsc-launcher
   사양이 작아서 보수적으로 잡아뒀어요. 나중에 서버 사양 올리면 늘려도 돼요)
 - `WSC_MAX_TRIALS` — 한 번 실행에 허용하는 최대 trial 수 (기본 100, 남용 방지용)
 - `WSC_MAX_SIM_CONCURRENT` — 동시에 몇 명까지 단일 시뮬레이션 실행을 허용할지 (기본 2)
+- `WSC_MAX_TELEMETRY_CONCURRENT` — 동시에 몇 개까지 CAN 텔레메트리 로그 파싱을 허용할지
+  (기본 1, Oracle 1GB RAM 기준)
+- `WSC_TELEMETRY_UPLOAD_MAX_BYTES` — CAN 로그 업로드 최대 크기 (기본 50MB)
 - `WSC_RUNS_STATE_PATH` — 서버 재시작 후 진행 카드/대기열 복원을 위한 상태 파일
   경로 (기본 `outputs/runs_state.json`; access token은 저장하지 않음)
 - `WSC_RATELIMIT_ENABLED` — 레이트 리밋 전체 킬 스위치 (기본 `1`; 긴급 시 `0`)
@@ -150,7 +153,8 @@ tail -f outputs/logs/server.log
 
 Optuna 탐색 자식 프로세스의 stdout/stderr는 실행마다
 `outputs/logs/run_{run_id}.log`에 저장됩니다. 단일 시뮬레이션 자식 프로세스는
-`outputs/logs/sim_{run_id}.log`에 저장됩니다. 서버 시작 시 오래된 실행 로그와
+`outputs/logs/sim_{run_id}.log`에 저장됩니다. CAN 텔레메트리 파싱 워커는
+`outputs/logs/telemetry_{run_id}.log`에 저장됩니다. 서버 시작 시 오래된 실행 로그와
 시뮬레이션 CSV/figure 산출물을 정리합니다.
 
 ## 아직 안 된 것 / 한계 (솔직하게)

@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timezone
 
 import requests
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -36,12 +36,15 @@ STUDIES_DIR = os.path.join(PROJECT_ROOT, "outputs", "studies")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "study_results")
 LOGS_DIR = os.path.join(PROJECT_ROOT, "outputs", "logs")
 SIM_RUNS_DIR = os.path.join(PROJECT_ROOT, "outputs", "sim_runs")
+TELEMETRY_DIR = os.path.join(PROJECT_ROOT, "outputs", "telemetry")
+TELEMETRY_UPLOAD_DIR = os.path.join(PROJECT_ROOT, "outputs", "telemetry_uploads")
 RUNS_STATE_PATH = os.environ.get(
     "WSC_RUNS_STATE_PATH",
     os.path.join(PROJECT_ROOT, "outputs", "runs_state.json"),
 )
 STUDY_RUNNER = os.path.join(PROJECT_ROOT, "server", "study_runner.py")
 SIM_RUNNER = os.path.join(PROJECT_ROOT, "server", "sim_runner.py")
+TELEMETRY_RUNNER = os.path.join(PROJECT_ROOT, "server", "telemetry_runner.py")
 
 # ---- 설정 (환경변수로 조절 가능, 없으면 기본값) ----
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://wijwbujsihhzzjzawfzp.supabase.co")
@@ -49,12 +52,16 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "sb_publishable_IKdkodgm
 MAX_CONCURRENT = int(os.environ.get("WSC_MAX_CONCURRENT", "1"))  # 지금 서버 사양 기준 보수적으로 1
 MAX_TRIALS_PER_RUN = int(os.environ.get("WSC_MAX_TRIALS", "100"))  # 한 번 실행에 허용하는 최대 trial 수 (남용 방지)
 MAX_SIM_CONCURRENT = int(os.environ.get("WSC_MAX_SIM_CONCURRENT", "2"))
+MAX_TELEMETRY_CONCURRENT = int(os.environ.get("WSC_MAX_TELEMETRY_CONCURRENT", "1"))
+MAX_TELEMETRY_UPLOAD_BYTES = int(os.environ.get("WSC_TELEMETRY_UPLOAD_MAX_BYTES", str(50 * 1024 * 1024)))
 CANCEL_GRACE_SECONDS = int(os.environ.get("WSC_CANCEL_GRACE_SECONDS", "300"))
 
 os.makedirs(STUDIES_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
 os.makedirs(SIM_RUNS_DIR, exist_ok=True)
+os.makedirs(TELEMETRY_DIR, exist_ok=True)
+os.makedirs(TELEMETRY_UPLOAD_DIR, exist_ok=True)
 
 logger = setup_logging(LOGS_DIR)
 logger.info("WSC Optuna launcher starting")
@@ -90,6 +97,8 @@ RUNS = {}       # run_id -> {user_email, study_name, n_trials, process, status, 
 QUEUE = []      # 대기 중인 run_id 리스트 (순서대로 처리)
 SIM_RUNS = {}
 SIM_QUEUE = []
+TELEMETRY_RUNS = {}
+TELEMETRY_QUEUE = []
 
 TERMINAL_STATUSES = {"done", "error", "lost", "interrupted", "stopped"}
 
@@ -120,6 +129,14 @@ def _sim_result_path(run_id: str):
     return os.path.join(SIM_RUNS_DIR, f"{run_id}.json")
 
 
+def _telemetry_result_path(run_id: str):
+    return os.path.join(TELEMETRY_DIR, f"{run_id}.json")
+
+
+def _telemetry_progress_path(run_id: str):
+    return os.path.join(TELEMETRY_DIR, f"{run_id}_progress.json")
+
+
 def _sanitize_for_state(run: dict, kind: str):
     allowed = {
         "run_id",
@@ -138,6 +155,10 @@ def _sanitize_for_state(run: dict, kind: str):
         "log_path",
         "pid",
         "interrupted_reason",
+        "file_name",
+        "file_size",
+        "stored_path",
+        "frame_count",
     }
     clean = {"kind": kind}
     for key in allowed:
@@ -157,6 +178,8 @@ def _state_snapshot_unlocked():
         "queue": [run_id for run_id in QUEUE if run_id in RUNS],
         "sim_runs": [_sanitize_for_state(run, "simulation") for run in SIM_RUNS.values()],
         "sim_queue": [run_id for run_id in SIM_QUEUE if run_id in SIM_RUNS],
+        "telemetry_runs": [_sanitize_for_state(run, "telemetry") for run in TELEMETRY_RUNS.values()],
+        "telemetry_queue": [run_id for run_id in TELEMETRY_QUEUE if run_id in TELEMETRY_RUNS],
     }
 
 
@@ -297,6 +320,32 @@ def _restore_sim_run(raw: dict):
     return run
 
 
+def _restore_telemetry_run(raw: dict):
+    run = dict(raw)
+    run.pop("kind", None)
+    run["process"] = None
+    status = run.get("status")
+    result_status = _load_result_status(_telemetry_result_path(run.get("run_id"))) if run.get("run_id") else None
+    if result_status:
+        run["status"] = result_status
+    elif status == "queued":
+        run["status"] = "interrupted"
+        run["interrupted_reason"] = "server restarted before queued telemetry upload could start"
+        run["finished_at"] = _now_iso()
+        try:
+            if run.get("stored_path") and os.path.exists(run["stored_path"]):
+                os.remove(run["stored_path"])
+        except OSError:
+            logger.warning("could not remove interrupted telemetry upload %s", run.get("stored_path"))
+    elif status == "running" and not _pid_alive(run.get("pid")):
+        run["status"] = "lost"
+        run["interrupted_reason"] = "server restarted and telemetry worker process is no longer alive"
+        run["finished_at"] = _now_iso()
+    elif status not in {"queued", "running", "finished_process", "done", "error", "lost", "interrupted"}:
+        run["status"] = "lost"
+    return run
+
+
 def _restore_runs_state():
     try:
         with open(RUNS_STATE_PATH, encoding="utf-8") as f:
@@ -312,6 +361,8 @@ def _restore_runs_state():
         QUEUE.clear()
         SIM_RUNS.clear()
         SIM_QUEUE.clear()
+        TELEMETRY_RUNS.clear()
+        TELEMETRY_QUEUE.clear()
 
         for raw in data.get("runs", []):
             run = _restore_optuna_run(raw)
@@ -323,14 +374,31 @@ def _restore_runs_state():
             if run.get("run_id"):
                 SIM_RUNS[run["run_id"]] = run
 
+        for raw in data.get("telemetry_runs", []):
+            run = _restore_telemetry_run(raw)
+            if run.get("run_id"):
+                TELEMETRY_RUNS[run["run_id"]] = run
+
         for run_id in data.get("sim_queue", []):
             run = SIM_RUNS.get(run_id)
             if run and run.get("status") == "queued":
                 SIM_QUEUE.append(run_id)
 
+        for run_id in data.get("telemetry_queue", []):
+            run = TELEMETRY_RUNS.get(run_id)
+            if run and run.get("status") == "queued":
+                TELEMETRY_QUEUE.append(run_id)
+
         _save_runs_state_unlocked()
 
-    logger.info("restored run state optuna=%s sim=%s sim_queue=%s", len(RUNS), len(SIM_RUNS), len(SIM_QUEUE))
+    logger.info(
+        "restored run state optuna=%s sim=%s sim_queue=%s telemetry=%s telemetry_queue=%s",
+        len(RUNS),
+        len(SIM_RUNS),
+        len(SIM_QUEUE),
+        len(TELEMETRY_RUNS),
+        len(TELEMETRY_QUEUE),
+    )
 
 
 def _cleanup_run_logs(keep: int = 50):
@@ -419,6 +487,10 @@ def _active_sim_count():
     return sum(1 for r in SIM_RUNS.values() if r["status"] == "running")
 
 
+def _active_telemetry_count():
+    return sum(1 for r in TELEMETRY_RUNS.values() if r["status"] == "running")
+
+
 def _try_start_next():
     """대기열 맨 앞을 꺼내서 자리가 있으면 시작. 반드시 _lock 잡고 호출."""
     while QUEUE and _active_count() < MAX_CONCURRENT:
@@ -473,6 +545,42 @@ def _try_start_next_sim():
         _save_runs_state_unlocked()
 
 
+def _try_start_next_telemetry():
+    while TELEMETRY_QUEUE and _active_telemetry_count() < MAX_TELEMETRY_CONCURRENT:
+        run_id = TELEMETRY_QUEUE.pop(0)
+        run = TELEMETRY_RUNS[run_id]
+        payload_path = os.path.join(TELEMETRY_DIR, f"{run_id}_payload.json")
+        log_path = os.path.join(LOGS_DIR, f"telemetry_{run_id}.log")
+        with open(payload_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "file_path": run["stored_path"],
+                    "file_name": run["file_name"],
+                    "file_size": run["file_size"],
+                    "user_id": run["user_id"],
+                    "access_token": run["access_token"],
+                },
+                f,
+                ensure_ascii=False,
+            )
+        logger.info("starting telemetry run_id=%s user_id=%s file=%s", run_id, run["user_id"], run["file_name"])
+        with open(log_path, "a", encoding="utf-8", buffering=1) as log_file:
+            log_file.write(f"{_now_iso()} starting telemetry run_id={run_id}\n")
+            proc = subprocess.Popen(
+                [sys.executable, TELEMETRY_RUNNER, run_id, payload_path],
+                cwd=PROJECT_ROOT,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
+        run["process"] = proc
+        run["pid"] = proc.pid
+        run["log_path"] = log_path
+        run["status"] = "running"
+        run["started_at"] = _now_iso()
+        logger.info("telemetry run_id=%s process started pid=%s log=%s", run_id, proc.pid, os.path.basename(log_path))
+        _save_runs_state_unlocked()
+
+
 def _watcher_loop():
     """백그라운드에서 끝난 프로세스를 정리하고, 자리 나면 대기열에서 다음 걸 시작."""
     while True:
@@ -497,6 +605,15 @@ def _watcher_loop():
                         logger.error("sim finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
                     run["status"] = "finished_process"
             _try_start_next_sim()
+            for run in TELEMETRY_RUNS.values():
+                if run["status"] == "running" and run["process"].poll() is not None:
+                    returncode = run["process"].returncode
+                    if returncode == 0:
+                        logger.info("telemetry finished run_id=%s returncode=0", run.get("run_id", "?"))
+                    else:
+                        logger.error("telemetry finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
+                    run["status"] = "finished_process"
+            _try_start_next_telemetry()
 
 
 def _watcher_loop_persistent():
@@ -563,6 +680,26 @@ def _watcher_loop_persistent():
                     changed = True
 
             _try_start_next_sim()
+
+            for run in TELEMETRY_RUNS.values():
+                if run["status"] != "running":
+                    continue
+                proc = run.get("process")
+                if proc is not None and proc.poll() is not None:
+                    returncode = proc.returncode
+                    if returncode == 0:
+                        logger.info("telemetry finished run_id=%s returncode=0", run.get("run_id", "?"))
+                    else:
+                        logger.error("telemetry finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
+                    run["status"] = "finished_process"
+                    run["finished_at"] = _now_iso()
+                    changed = True
+                elif proc is None and not _pid_alive(run.get("pid")):
+                    run["status"] = "finished_process" if os.path.exists(_telemetry_result_path(run.get("run_id"))) else "lost"
+                    run["finished_at"] = _now_iso()
+                    changed = True
+
+            _try_start_next_telemetry()
             if changed:
                 _save_runs_state_unlocked()
 
@@ -842,6 +979,41 @@ def _read_sim_progress(run_id: str):
     except (OSError, json.JSONDecodeError):
         return {"pct": 0.0, "started_at": None}
 
+
+def _read_telemetry_progress(run_id: str):
+    try:
+        with open(_telemetry_progress_path(run_id), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"status": "queued", "frame_count": 0, "started_at": None}
+
+
+def _safe_upload_name(name: str):
+    base = os.path.basename(name or "canlog.csv")
+    safe = "".join(c if c.isalnum() or c in {".", "-", "_"} else "_" for c in base)
+    return safe[:120] or "canlog.csv"
+
+
+def _supabase_headers(access_token: str, content_type: str | None = "application/json"):
+    headers = {"Authorization": f"Bearer {access_token}", "apikey": SUPABASE_ANON_KEY}
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def _supabase_get(path: str, access_token: str, params: dict | None = None):
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/{path}",
+        headers=_supabase_headers(access_token, None),
+        params=params or {},
+        timeout=20,
+    )
+    if resp.status_code in (401, 403):
+        raise HTTPException(status_code=resp.status_code, detail="Supabase telemetry access denied.")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail="Supabase telemetry query failed.")
+    return resp.json()
+
 @app.post("/api/sim/runs")
 def create_sim_run(payload: dict, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
@@ -1004,6 +1176,185 @@ def get_default_sim_config():
     except Exception:
         logger.exception("default config load failed")
         raise HTTPException(status_code=500, detail="Default config failed to load.")
+
+
+@app.get("/api/telemetry/signals")
+def get_telemetry_signals():
+    try:
+        from telemetry.signals import load_signal_defs
+
+        rows = load_signal_defs()
+        return {"signals": rows, "primary": [row for row in rows if row.get("priority") == "PRIMARY"]}
+    except Exception:
+        logger.exception("telemetry signal load failed")
+        raise HTTPException(status_code=500, detail="Telemetry signal definitions failed to load.")
+
+
+@app.post("/api/telemetry/logs")
+async def upload_telemetry_log(file: UploadFile = File(...), authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    enforce_run_creation_rate(user.get("id"), "/api/telemetry/logs")
+    access_token = authorization.removeprefix("Bearer ").strip()
+    run_id = uuid.uuid4().hex[:12]
+    file_name = _safe_upload_name(file.filename or "canlog.csv")
+    stored_path = os.path.join(TELEMETRY_UPLOAD_DIR, f"{run_id}_{file_name}")
+    total = 0
+    try:
+        with open(stored_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_TELEMETRY_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="Telemetry log exceeds the upload size limit.")
+                out.write(chunk)
+    except HTTPException:
+        try:
+            os.remove(stored_path)
+        except OSError:
+            pass
+        raise
+    finally:
+        await file.close()
+
+    nickname = (user.get("user_metadata") or {}).get("nickname") or user.get("email", "user")
+    with _lock:
+        TELEMETRY_RUNS[run_id] = {
+            "run_id": run_id,
+            "user_id": user.get("id"),
+            "user_email": user.get("email"),
+            "nickname": nickname,
+            "access_token": access_token,
+            "file_name": file_name,
+            "file_size": total,
+            "stored_path": stored_path,
+            "process": None,
+            "status": "queued",
+            "queued_at": _now_iso(),
+            "started_at": None,
+            "log_path": None,
+            "frame_count": 0,
+        }
+        TELEMETRY_QUEUE.append(run_id)
+        logger.info("queued telemetry run_id=%s user_id=%s file=%s size=%s", run_id, user.get("id"), file_name, total)
+        _save_runs_state_unlocked()
+        _try_start_next_telemetry()
+    return {"run_id": run_id, "file_name": file_name, "file_size": total}
+
+
+@app.get("/api/telemetry/logs")
+def list_telemetry_logs(authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    access_token = authorization.removeprefix("Bearer ").strip()
+    rows = _supabase_get(
+        "telemetry_logs",
+        access_token,
+        {
+            "select": "id,file_name,status,frame_count,min_timestamp,max_timestamp,created_at,finished_at",
+            "user_id": f"eq.{user.get('id')}",
+            "order": "created_at.desc",
+            "limit": "20",
+        },
+    )
+    with _lock:
+        active = [
+            {
+                "id": run_id,
+                "file_name": run.get("file_name"),
+                "status": run.get("status"),
+                "frame_count": _read_telemetry_progress(run_id).get("frame_count", run.get("frame_count", 0)),
+                "created_at": run.get("queued_at"),
+            }
+            for run_id, run in TELEMETRY_RUNS.items()
+            if run.get("user_id") == user.get("id") and run.get("status") not in TERMINAL_STATUSES
+        ]
+    active_ids = {row.get("id") for row in active}
+    return {"logs": active + [row for row in rows if row.get("id") not in active_ids]}
+
+
+@app.get("/api/telemetry/logs/{run_id}")
+def get_telemetry_log(run_id: str, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    with _lock:
+        run = TELEMETRY_RUNS.get(run_id)
+        if not run:
+            run = None
+        elif run["user_id"] != user.get("id"):
+            raise HTTPException(status_code=403, detail="You can only read your own telemetry log.")
+        if run:
+            status = run.get("status")
+            position = TELEMETRY_QUEUE.index(run_id) + 1 if run_id in TELEMETRY_QUEUE else None
+        else:
+            status = None
+            position = None
+
+    if run and status in ("finished_process", "done", "error"):
+        result_path = _telemetry_result_path(run_id)
+        if os.path.exists(result_path):
+            with open(result_path, encoding="utf-8") as f:
+                result = json.load(f)
+            final_status = result.get("status", "error")
+            with _lock:
+                run["status"] = final_status
+                run["finished_at"] = run.get("finished_at") or _now_iso()
+                run["frame_count"] = result.get("frame_count", run.get("frame_count", 0))
+                _save_runs_state_unlocked()
+            return {"run_id": run_id, "status": final_status, "result": result}
+        return {"run_id": run_id, "status": "finalizing"}
+
+    if run and status == "queued":
+        return {"run_id": run_id, "status": "queued", "position": position, "progress_pct": 0, "frame_count": 0}
+
+    if run and status == "running":
+        progress = _read_telemetry_progress(run_id)
+        return {
+            "run_id": run_id,
+            "status": progress.get("status", "running"),
+            "frame_count": progress.get("frame_count", 0),
+            "progress_pct": None,
+        }
+
+    if run and status in ("lost", "interrupted"):
+        return {
+            "run_id": run_id,
+            "status": status,
+            "detail": run.get("interrupted_reason") or "Telemetry upload is no longer active.",
+            "frame_count": run.get("frame_count", 0),
+        }
+
+    access_token = authorization.removeprefix("Bearer ").strip()
+    rows = _supabase_get(
+        "telemetry_logs",
+        access_token,
+        {"select": "*", "id": f"eq.{run_id}", "user_id": f"eq.{user.get('id')}", "limit": "1"},
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Telemetry log not found.")
+    return {"run_id": run_id, "status": rows[0].get("status"), "result": rows[0]}
+
+
+@app.get("/api/telemetry/logs/{run_id}/series")
+def get_telemetry_series(run_id: str, can_id: str | None = None, limit: int = 1000, authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    access_token = authorization.removeprefix("Bearer ").strip()
+    log_rows = _supabase_get(
+        "telemetry_logs",
+        access_token,
+        {"select": "id", "id": f"eq.{run_id}", "user_id": f"eq.{user.get('id')}", "limit": "1"},
+    )
+    if not log_rows:
+        raise HTTPException(status_code=404, detail="Telemetry log not found.")
+    params = {
+        "select": "frame_index,timestamp_text,can_id,raw_data_hex,seg_one,seg_two",
+        "log_id": f"eq.{run_id}",
+        "order": "frame_index.asc",
+        "limit": str(max(1, min(int(limit), 5000))),
+    }
+    if can_id:
+        params["can_id"] = f"eq.{can_id}"
+    rows = _supabase_get("telemetry_frames", access_token, params)
+    return {"frames": rows}
 
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
