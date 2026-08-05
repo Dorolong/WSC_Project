@@ -14,7 +14,7 @@ Darwin~Adelaide 3,038km 경로에서 SOC·일사량·경사·풍향·에너지 �
 > | 문서 | 역할 |
 > |---|---|
 > | `README.md` | 전체 요약 — 구조·원리·현재 상태·다음 할 일 (**여기서 시작**) |
-> | `progress/47_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
+> | `progress/49_향후_개선_과제_백로그.txt` | 지금 당장 다음에 할 일 (항상 가장 큰 번호가 최신 백로그) |
 > | `progress/NN_주제.txt` | 완료된 작업별 상세 기록 |
 > | `debug_logs/(날짜)_주제.txt` | 버그 추적·디버깅 과정 |
 > | `SETUP.md` | 다른 컴퓨터에서 환경 재현하는 방법 |
@@ -202,8 +202,8 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 | 1 | 경로·환경 데이터 수집 / 차량 물리 모델 | **완료** |
 | 2 | Rule-based MPC (LV1~LV5 ramp + LV8 페이스 블렌딩) | **완료** |
 | 3 | Streamlit 시뮬레이터 UI | **완료** |
-| 4 | 웹 배포 (Streamlit Cloud + Supabase + Optuna 런처) | **완료**(런처 실기동 검증 전) |
-| 4-1 | 웹 통합 / HTML 전환 (`progress/43`) | **구현 완료** — Phase 0~6 완료, 서버 실배포 확인 전 |
+| 4 | 웹 배포 (Streamlit Cloud + Supabase + Optuna 런처) | **완료**(HTTPS 배포 완료) |
+| 4-1 | 웹 통합 / HTML 전환 (`progress/43`) | **완료** — HTTPS 배포·검증 끝 (`progress/48`) |
 | 5 | MPC 물리 building block (코스팅/제동/내리막 캡) | **진행 중** |
 | 6 | 비용함수 기반 MPC로 전환 | 설계 논의만 완료 |
 | 7 | AI 예측 모델 (발전량 / 소비전력) — `ai_models/` | 미착수 |
@@ -245,31 +245,31 @@ LV1 SOC 기반 기저속도 → LV2 경사(+momentum) → LV3 일사량 → LV4 
 
 ## 4. 다음에 할 일
 
-> 자세한 내용은 [`progress/47_향후_개선_과제_백로그.txt`](progress/47_향후_개선_과제_백로그.txt)
+> 자세한 내용은 [`progress/49_향후_개선_과제_백로그.txt`](progress/49_향후_개선_과제_백로그.txt)
 
-### 1순위 — 첫 배포를 HTTPS로 ([`progress/46`](progress/46_도메인_TLS_보안_계획.txt))
+### ✅ 완료 — HTTPS 배포 ([`progress/48`](progress/48_HTTPS_실배포.txt))
 
-서버가 **아직 한 번도 실제로 배포된 적이 없습니다**(`progress/45` 검증 제한).
-그래서 "평문으로 먼저 띄우고 나중에 HTTPS 붙이기"를 할 이유가 없습니다 —
-원래의 실기동 검증과 도메인/TLS 작업을 **합쳐서 처음부터 Caddy 뒤에서** 띄웁니다.
+**https://wsc-drive.duckdns.org 로 서비스 중입니다.** 평문 HTTP로 오가던 로그인
+토큰 노출을 닫았습니다. 배포 중 버그 3건(로그 client IP 누락, `optuna_runs`
+GRANT 누락, 토큰 만료 401)을 찾아 고쳤습니다 — 상세는 `progress/48`.
 
-> 🚨 **지금 뚫려 있는 것**: `http://161.33.149.239:8000` — 평문 HTTP + 생 IP.
-> Supabase 로그인 자체는 HTTPS라 안전하지만, 발급받은 access token을 우리 서버로
-> 보낼 때 `Authorization: Bearer ...`가 **평문으로 나갑니다.** 같은 네트워크에 있는
-> 사람이 토큰을 주워 본인 계정으로 API를 호출할 수 있습니다.
+### 1순위 — [`docs/codex_next_tasks.txt`](docs/codex_next_tasks.txt) 의 작업 2건
 
-확정: 도메인 = 무료(**DuckDNS** 권장) · TLS = **Caddy** · 범위 = TLS + 방화벽 + 보안헤더
+1. **회원가입 모달** — 새 프론트에 회원가입이 **아예 없습니다.** 신규 팀원이
+   계정을 만들 방법이 없고, `app.py`를 없애면 가입 경로가 사라집니다.
+   사용자 영향이 가장 큽니다
+2. **서버 재시작 시 실행 상태 소실** — `RUNS`/`QUEUE`가 메모리 전용이라
+   재시작하면 진행률 카드가 사라지고 대기열 순번이 날아갑니다.
+   완료 결과는 파일+Supabase에 남으므로 데이터 유실은 아닙니다
 
-- [ ] DuckDNS 도메인 확보 + A 레코드 (오라클 IP를 **reserved**로 전환 권장)
-- [ ] 방화벽 **2겹** 개방 — 오라클 Security List + 서버 `iptables`
-      (`netfilter-persistent save` 필수). **8000은 오히려 닫습니다**
-- [ ] Caddy 설치 + `server/Caddyfile` 적용 (인증서 자동 발급·갱신)
-- [ ] [레포] uvicorn을 `--host 127.0.0.1`로, Caddyfile 커밋,
-      `app.py`의 `WSC_OPTUNA_SERVER_URL`을 https 도메인으로
-- [ ] 배포 후 로그인 → 시뮬레이션 → Optuna 탐색 관통 확인
-      (원래 1순위였던 실기동 검증을 여기서 같이 끝냄)
+### 남은 보안 항목 (`progress/46`에서 다음으로 미룬 것)
 
-⚠️ 대부분 SSH/오라클 콘솔 작업이라 **Codex에게 위임 못 합니다.** 레포 변경만 위임 가능.
+- **레이트 리밋 없음** — 스캐너 probe가 실제로 로그에 잡히고 있습니다
+- Supabase anon key 하드코딩 (RLS 전제하 공개 가능 값이라 급하진 않음)
+- **RLS 정책 전수 점검** — `optuna_runs`에서 GRANT가 빠져 있었으므로 다른
+  테이블도 확인할 값어치가 있습니다
+- 의존성 취약점 점검, 백업
+- HSTS를 1주일 → 1년으로 (몇 주 안정 확인 후)
 
 ### 2순위 (트랙 A) — 웹 통합 / HTML 전환 (**Phase 0~6 구현 완료, 배포 확인 전**)
 > 트랙 A와 B는 서로 독립적입니다. 어느 쪽을 먼저 할지는 사용자 판단.
