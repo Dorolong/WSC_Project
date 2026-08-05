@@ -18,9 +18,30 @@ async function getClient() {
   // API 호출 때마다 "지금 유효한 토큰"을 꺼내갈 수 있게 등록한다.
   // 로그인 시점의 토큰을 붙잡아두면 1시간 뒤 만료되어 이후 호출이
   // 전부 401이 된다 - state.js의 apiHeaders() 주석 참고.
+  //
+  // getSession()만으로는 부족하다. 페이지를 열 때 localStorage에 남아있던
+  // 세션이 이미 만료됐어도 getSession()은 그 만료된 토큰을 그대로 돌려주고,
+  // supabase-js의 자동 갱신은 조금 뒤에야 돈다. 그래서 페이지 로드 직후
+  // 첫 API 호출만 401이 나는 현상이 있었다(로그상 로드당 정확히 1회).
+  // 만료가 임박했거나 이미 지났으면 여기서 직접 갱신한다.
   setTokenProvider(async () => {
     const { data } = await supabaseClient.auth.getSession();
-    return data.session ? data.session.access_token : null;
+    const session = data.session;
+    if (!session) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    const needsRefresh = !session.expires_at || session.expires_at - now < 60;
+    if (!needsRefresh) return session.access_token;
+
+    try {
+      const { data: refreshed, error } = await supabaseClient.auth.refreshSession();
+      if (error || !refreshed.session) return session.access_token;
+      return refreshed.session.access_token;
+    } catch (e) {
+      // 갱신 실패는 조용히 넘긴다 - 만료된 토큰이라도 보내보고,
+      // 서버가 401을 주면 사용자가 다시 로그인하면 된다.
+      return session.access_token;
+    }
   });
 
   return supabaseClient;
