@@ -103,9 +103,28 @@ async function pollSimulation() {
       clearInterval(simTimer);
       setText("simStatus", "Error");
       setText("simText", data.result?.error || "Simulation failed.");
+    } else if (data.status === "lost" || data.status === "interrupted") {
+      clearInterval(simTimer);
+      setText("simStatus", "Interrupted");
+      setText("simText", data.detail || "Simulation was interrupted by a server restart.");
     }
   } catch (e) {
     document.getElementById("simErr").textContent = e.message;
+  }
+}
+
+async function resumeSimulation() {
+  try {
+    const res = await fetch("/api/sim/my-active-run", { headers: await apiHeaders() });
+    const data = await res.json();
+    if (!res.ok || !data.run_id) return;
+    simRunId = data.run_id;
+    document.getElementById("simResultCard").hidden = false;
+    await pollSimulation();
+    if (simTimer) clearInterval(simTimer);
+    simTimer = setInterval(pollSimulation, 1500);
+  } catch (e) {
+    // The next explicit run can recover from transient auth/network failures.
   }
 }
 
@@ -166,6 +185,7 @@ export function initSimulator() {
   initRouteMap().catch((e) => {
     document.getElementById("simErr").textContent = e.message;
   });
+  resumeSimulation();
   document.getElementById("simRunBtn").addEventListener("click", startSimulation);
   document.getElementById("simCsvBtn").addEventListener("click", () => {
     downloadCsv().catch((e) => {

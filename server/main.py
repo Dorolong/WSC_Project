@@ -35,6 +35,10 @@ STUDIES_DIR = os.path.join(PROJECT_ROOT, "outputs", "studies")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "study_results")
 LOGS_DIR = os.path.join(PROJECT_ROOT, "outputs", "logs")
 SIM_RUNS_DIR = os.path.join(PROJECT_ROOT, "outputs", "sim_runs")
+RUNS_STATE_PATH = os.environ.get(
+    "WSC_RUNS_STATE_PATH",
+    os.path.join(PROJECT_ROOT, "outputs", "runs_state.json"),
+)
 STUDY_RUNNER = os.path.join(PROJECT_ROOT, "server", "study_runner.py")
 SIM_RUNNER = os.path.join(PROJECT_ROOT, "server", "sim_runner.py")
 
@@ -81,6 +85,166 @@ RUNS = {}       # run_id -> {user_email, study_name, n_trials, process, status, 
 QUEUE = []      # 대기 중인 run_id 리스트 (순서대로 처리)
 SIM_RUNS = {}
 SIM_QUEUE = []
+
+TERMINAL_STATUSES = {"done", "error", "lost", "interrupted"}
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _study_result_path(study_name: str):
+    return os.path.join(RESULTS_DIR, f"{study_name}.json")
+
+
+def _sim_result_path(run_id: str):
+    return os.path.join(SIM_RUNS_DIR, f"{run_id}.json")
+
+
+def _sanitize_for_state(run: dict, kind: str):
+    allowed = {
+        "run_id",
+        "user_id",
+        "user_email",
+        "nickname",
+        "study_name",
+        "n_trials",
+        "params",
+        "cfg",
+        "status",
+        "queued_at",
+        "started_at",
+        "finished_at",
+        "log_path",
+        "pid",
+        "interrupted_reason",
+    }
+    clean = {"kind": kind}
+    for key in allowed:
+        if key in run:
+            clean[key] = run.get(key)
+    proc = run.get("process")
+    if proc is not None:
+        clean["pid"] = proc.pid
+    return clean
+
+
+def _state_snapshot_unlocked():
+    return {
+        "version": 1,
+        "saved_at": _now_iso(),
+        "runs": [_sanitize_for_state(run, "optuna") for run in RUNS.values()],
+        "queue": [run_id for run_id in QUEUE if run_id in RUNS],
+        "sim_runs": [_sanitize_for_state(run, "simulation") for run in SIM_RUNS.values()],
+        "sim_queue": [run_id for run_id in SIM_QUEUE if run_id in SIM_RUNS],
+    }
+
+
+def _save_runs_state_unlocked():
+    os.makedirs(os.path.dirname(RUNS_STATE_PATH), exist_ok=True)
+    tmp_path = f"{RUNS_STATE_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(_state_snapshot_unlocked(), f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, RUNS_STATE_PATH)
+
+
+def _load_result_status(path: str):
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("status")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _restore_optuna_run(raw: dict):
+    run = dict(raw)
+    run.pop("kind", None)
+    run["process"] = None
+    status = run.get("status")
+    study_name = run.get("study_name")
+    result_status = _load_result_status(_study_result_path(study_name)) if study_name else None
+    if result_status:
+        run["status"] = result_status
+    elif status == "queued":
+        # Optuna needs the user's access token to report trial rows to Supabase.
+        # Tokens are intentionally never persisted, so queued Optuna work cannot
+        # be restarted after a server reboot.
+        run["status"] = "interrupted"
+        run["interrupted_reason"] = "server restarted before queued Optuna run could start"
+        run["finished_at"] = _now_iso()
+    elif status == "running" and not _pid_alive(run.get("pid")):
+        run["status"] = "lost"
+        run["interrupted_reason"] = "server restarted and Optuna worker process is no longer alive"
+        run["finished_at"] = _now_iso()
+    elif status not in {"running", "finished_process", "done", "error", "lost", "interrupted"}:
+        run["status"] = "lost"
+    return run
+
+
+def _restore_sim_run(raw: dict):
+    run = dict(raw)
+    run.pop("kind", None)
+    run["process"] = None
+    status = run.get("status")
+    result_status = _load_result_status(_sim_result_path(run.get("run_id"))) if run.get("run_id") else None
+    if result_status:
+        run["status"] = result_status
+    elif status == "running" and not _pid_alive(run.get("pid")):
+        run["status"] = "lost"
+        run["interrupted_reason"] = "server restarted and simulation worker process is no longer alive"
+        run["finished_at"] = _now_iso()
+    elif status not in {"queued", "running", "finished_process", "done", "error", "lost", "interrupted"}:
+        run["status"] = "lost"
+    return run
+
+
+def _restore_runs_state():
+    try:
+        with open(RUNS_STATE_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return
+    except (OSError, json.JSONDecodeError):
+        logger.warning("run state restore failed; starting with empty in-memory queues", exc_info=True)
+        return
+
+    with _lock:
+        RUNS.clear()
+        QUEUE.clear()
+        SIM_RUNS.clear()
+        SIM_QUEUE.clear()
+
+        for raw in data.get("runs", []):
+            run = _restore_optuna_run(raw)
+            if run.get("run_id"):
+                RUNS[run["run_id"]] = run
+
+        for raw in data.get("sim_runs", []):
+            run = _restore_sim_run(raw)
+            if run.get("run_id"):
+                SIM_RUNS[run["run_id"]] = run
+
+        for run_id in data.get("sim_queue", []):
+            run = SIM_RUNS.get(run_id)
+            if run and run.get("status") == "queued":
+                SIM_QUEUE.append(run_id)
+
+        _save_runs_state_unlocked()
+
+    logger.info("restored run state optuna=%s sim=%s sim_queue=%s", len(RUNS), len(SIM_RUNS), len(SIM_QUEUE))
 
 
 def _cleanup_run_logs(keep: int = 50):
@@ -178,7 +342,7 @@ def _try_start_next():
         logger.info("starting run_id=%s study=%s n_trials=%s", run_id, run["study_name"], run["n_trials"])
         with open(log_path, "a", encoding="utf-8", buffering=1) as log_file:
             log_file.write(
-                f"{datetime.now(timezone.utc).isoformat()} "
+                f"{_now_iso()} "
                 f"starting study={run['study_name']} n_trials={run['n_trials']}\n"
             )
             proc = subprocess.Popen(
@@ -189,10 +353,12 @@ def _try_start_next():
                 stderr=subprocess.STDOUT,
             )
         run["process"] = proc
+        run["pid"] = proc.pid
         run["log_path"] = log_path
         run["status"] = "running"
-        run["started_at"] = datetime.now(timezone.utc).isoformat()
+        run["started_at"] = _now_iso()
         logger.info("run_id=%s process started pid=%s log=%s", run_id, proc.pid, os.path.basename(log_path))
+        _save_runs_state_unlocked()
 
 
 def _try_start_next_sim():
@@ -205,7 +371,7 @@ def _try_start_next_sim():
             json.dump({"params": run["params"], "cfg": run["cfg"], "user_id": run["user_id"]}, f, ensure_ascii=False)
         logger.info("starting sim run_id=%s user_id=%s", run_id, run["user_id"])
         with open(log_path, "a", encoding="utf-8", buffering=1) as log_file:
-            log_file.write(f"{datetime.now(timezone.utc).isoformat()} starting sim run_id={run_id}\n")
+            log_file.write(f"{_now_iso()} starting sim run_id={run_id}\n")
             proc = subprocess.Popen(
                 [sys.executable, SIM_RUNNER, run_id, payload_path],
                 cwd=PROJECT_ROOT,
@@ -213,10 +379,12 @@ def _try_start_next_sim():
                 stderr=subprocess.STDOUT,
             )
         run["process"] = proc
+        run["pid"] = proc.pid
         run["log_path"] = log_path
         run["status"] = "running"
-        run["started_at"] = datetime.now(timezone.utc).isoformat()
+        run["started_at"] = _now_iso()
         logger.info("sim run_id=%s process started pid=%s log=%s", run_id, proc.pid, os.path.basename(log_path))
+        _save_runs_state_unlocked()
 
 
 def _watcher_loop():
@@ -224,6 +392,7 @@ def _watcher_loop():
     while True:
         time.sleep(2)
         with _lock:
+            changed = False
             for run in RUNS.values():
                 if run["status"] == "running" and run["process"].poll() is not None:
                     returncode = run["process"].returncode
@@ -244,7 +413,57 @@ def _watcher_loop():
             _try_start_next_sim()
 
 
-threading.Thread(target=_watcher_loop, daemon=True).start()
+def _watcher_loop_persistent():
+    """Watch child processes, including restored jobs without Popen handles."""
+    while True:
+        time.sleep(2)
+        with _lock:
+            changed = False
+            for run in RUNS.values():
+                if run["status"] != "running":
+                    continue
+                proc = run.get("process")
+                if proc is not None and proc.poll() is not None:
+                    returncode = proc.returncode
+                    if returncode == 0:
+                        logger.info("run finished run_id=%s returncode=0", run.get("run_id", "?"))
+                    else:
+                        logger.error("run finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
+                    run["status"] = "finished_process"
+                    run["finished_at"] = _now_iso()
+                    changed = True
+                elif proc is None and not _pid_alive(run.get("pid")):
+                    run["status"] = "finished_process" if os.path.exists(_study_result_path(run.get("study_name"))) else "lost"
+                    run["finished_at"] = _now_iso()
+                    changed = True
+
+            _try_start_next()
+
+            for run in SIM_RUNS.values():
+                if run["status"] != "running":
+                    continue
+                proc = run.get("process")
+                if proc is not None and proc.poll() is not None:
+                    returncode = proc.returncode
+                    if returncode == 0:
+                        logger.info("sim finished run_id=%s returncode=0", run.get("run_id", "?"))
+                    else:
+                        logger.error("sim finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
+                    run["status"] = "finished_process"
+                    run["finished_at"] = _now_iso()
+                    changed = True
+                elif proc is None and not _pid_alive(run.get("pid")):
+                    run["status"] = "finished_process" if os.path.exists(_sim_result_path(run.get("run_id"))) else "lost"
+                    run["finished_at"] = _now_iso()
+                    changed = True
+
+            _try_start_next_sim()
+            if changed:
+                _save_runs_state_unlocked()
+
+
+_restore_runs_state()
+threading.Thread(target=_watcher_loop_persistent, daemon=True).start()
 
 
 def _read_progress_data(study_name: str):
@@ -325,7 +544,11 @@ def get_my_active_run(authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
     user_id = user.get("id")
     with _lock:
-        mine = [(run_id, run) for run_id, run in RUNS.items() if run["user_id"] == user_id]
+        mine = [
+            (run_id, run)
+            for run_id, run in RUNS.items()
+            if run["user_id"] == user_id and run.get("status") not in TERMINAL_STATUSES
+        ]
     if not mine:
         return {"run_id": None}
     mine.sort(key=lambda x: x[1]["queued_at"], reverse=True)
@@ -355,13 +578,14 @@ def create_run(payload: dict, authorization: str | None = Header(default=None)):
             "n_trials": n_trials,
             "process": None,
             "status": "queued",
-            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "queued_at": _now_iso(),
             "started_at": None,
             "run_id": run_id,
             "log_path": None,
         }
         QUEUE.append(run_id)
         logger.info("queued run_id=%s user_id=%s nickname=%s n_trials=%s", run_id, user.get("id"), nickname, n_trials)
+        _save_runs_state_unlocked()
         _try_start_next()
 
     return {"run_id": run_id, "study_name": study_name}
@@ -392,15 +616,25 @@ def get_run(run_id: str, authorization: str | None = Header(default=None)):
                 ahead_trials += RUNS[other_id]["n_trials"]
 
     if status in ("finished_process", "done", "error"):
-        result_path = os.path.join(RESULTS_DIR, f"{study_name}.json")
+        result_path = _study_result_path(study_name)
         if os.path.exists(result_path):
             with open(result_path, encoding="utf-8") as f:
                 result = json.load(f)
             with _lock:
                 run["status"] = result["status"]  # done | error
+                run["finished_at"] = run.get("finished_at") or _now_iso()
+                _save_runs_state_unlocked()
             return {"run_id": run_id, "status": result["status"], "n_trials": n_trials, "result": result}
         # 프로세스는 끝났는데 결과 파일이 아직 안 써졌으면 잠깐 더 기다리라고 안내
         return {"run_id": run_id, "status": "finalizing", "n_trials": n_trials}
+
+    if status in ("lost", "interrupted"):
+        return {
+            "run_id": run_id,
+            "status": status,
+            "n_trials": n_trials,
+            "detail": run.get("interrupted_reason") or "Run is no longer active.",
+        }
 
     if status == "queued":
         pace = _get_pace()
@@ -447,11 +681,6 @@ def _read_sim_progress(run_id: str):
     except (OSError, json.JSONDecodeError):
         return {"pct": 0.0, "started_at": None}
 
-
-def _sim_result_path(run_id: str):
-    return os.path.join(SIM_RUNS_DIR, f"{run_id}.json")
-
-
 @app.post("/api/sim/runs")
 def create_sim_run(payload: dict, authorization: str | None = Header(default=None)):
     user = verify_user(authorization)
@@ -470,14 +699,31 @@ def create_sim_run(payload: dict, authorization: str | None = Header(default=Non
             "cfg": cfg,
             "process": None,
             "status": "queued",
-            "queued_at": datetime.now(timezone.utc).isoformat(),
+            "queued_at": _now_iso(),
             "started_at": None,
             "log_path": None,
         }
         SIM_QUEUE.append(run_id)
         logger.info("queued sim run_id=%s user_id=%s nickname=%s", run_id, user.get("id"), nickname)
+        _save_runs_state_unlocked()
         _try_start_next_sim()
     return {"run_id": run_id}
+
+
+@app.get("/api/sim/my-active-run")
+def get_my_active_sim_run(authorization: str | None = Header(default=None)):
+    user = verify_user(authorization)
+    user_id = user.get("id")
+    with _lock:
+        mine = [
+            (run_id, run)
+            for run_id, run in SIM_RUNS.items()
+            if run["user_id"] == user_id and run.get("status") not in TERMINAL_STATUSES
+        ]
+    if not mine:
+        return {"run_id": None}
+    mine.sort(key=lambda x: x[1]["queued_at"], reverse=True)
+    return {"run_id": mine[0][0]}
 
 
 @app.get("/api/sim/runs/{run_id}")
@@ -500,8 +746,18 @@ def get_sim_run(run_id: str, authorization: str | None = Header(default=None)):
             final_status = result.get("status", "error")
             with _lock:
                 run["status"] = final_status
+                run["finished_at"] = run.get("finished_at") or _now_iso()
+                _save_runs_state_unlocked()
             return {"run_id": run_id, "status": final_status, "result": result}
         return {"run_id": run_id, "status": "finalizing"}
+
+    if status in ("lost", "interrupted"):
+        return {
+            "run_id": run_id,
+            "status": status,
+            "detail": run.get("interrupted_reason") or "Simulation is no longer active.",
+            "progress_pct": 0,
+        }
 
     if status == "queued":
         return {"run_id": run_id, "status": "queued", "position": position, "progress_pct": 0}
