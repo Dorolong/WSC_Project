@@ -58,15 +58,21 @@ app = FastAPI(title="WSC Optuna Launcher")
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    # 접속자 IP. Caddy 리버스 프록시 뒤에 있으므로 그냥 두면 전부
+    # 127.0.0.1로 찍힌다. systemd의 --proxy-headers --forwarded-allow-ips
+    # 127.0.0.1 덕분에 uvicorn이 X-Forwarded-For를 반영해주고, 신뢰
+    # 대상을 로컬 프록시로 한정했으므로 헤더 위조로 오염되지 않는다.
+    # (Authorization 헤더 값은 절대 로그에 남기지 말 것 - 토큰이다)
+    client = request.client.host if request.client else "-"
     start = time.perf_counter()
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = (time.perf_counter() - start) * 1000
-        logger.exception("%s %s error %.1fms", request.method, request.url.path, elapsed_ms)
+        logger.exception("%s %s %s error %.1fms", client, request.method, request.url.path, elapsed_ms)
         raise
     elapsed_ms = (time.perf_counter() - start) * 1000
-    logger.info("%s %s %s %.1fms", request.method, request.url.path, response.status_code, elapsed_ms)
+    logger.info("%s %s %s %s %.1fms", client, request.method, request.url.path, response.status_code, elapsed_ms)
     return response
 
 # ---- 실행 상태 관리 (메모리에 보관 - 서버 재시작하면 초기화됨, 진행 중이던 것도 새로 세야 함) ----
