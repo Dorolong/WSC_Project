@@ -76,6 +76,21 @@ sudo systemctl restart wsc-launcher
 - `WSC_MAX_CONCURRENT` — 동시에 몇 명까지 탐색 실행 허용할지 (기본 1, 지금 서버
   사양이 작아서 보수적으로 잡아뒀어요. 나중에 서버 사양 올리면 늘려도 돼요)
 - `WSC_MAX_TRIALS` — 한 번 실행에 허용하는 최대 trial 수 (기본 100, 남용 방지용)
+- `WSC_LOG_LEVEL` — 서버 로그 레벨 (기본 `INFO`)
+
+## 로그 확인
+
+서버 로그는 `outputs/logs/server.log`에 저장되고, 20MB 단위로 최대 10개까지
+회전합니다. systemd로 실행 중이면 journald에도 같은 로그가 남습니다.
+
+```bash
+journalctl -u wsc-launcher -f
+tail -f outputs/logs/server.log
+```
+
+Optuna 탐색 자식 프로세스의 stdout/stderr는 실행마다
+`outputs/logs/run_{run_id}.log`에 저장됩니다. 서버 시작 시 `run_*.log`는 최근
+50개만 남기고 정리합니다.
 
 ## 아직 안 된 것 / 한계 (솔직하게)
 

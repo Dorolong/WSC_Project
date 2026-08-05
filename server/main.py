@@ -23,14 +23,16 @@ import time
 from datetime import datetime, timezone
 
 import requests
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+from server.logging_conf import setup_logging
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STUDIES_DIR = os.path.join(PROJECT_ROOT, "outputs", "studies")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "outputs", "study_results")
+LOGS_DIR = os.path.join(PROJECT_ROOT, "outputs", "logs")
 STUDY_RUNNER = os.path.join(PROJECT_ROOT, "server", "study_runner.py")
 
 # ---- 설정 (환경변수로 조절 가능, 없으면 기본값) ----
@@ -41,19 +43,52 @@ MAX_TRIALS_PER_RUN = int(os.environ.get("WSC_MAX_TRIALS", "100"))  # 한 번 실
 
 os.makedirs(STUDIES_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+logger = setup_logging(LOGS_DIR)
+logger.info("WSC Optuna launcher starting")
 
 app = FastAPI(title="WSC Optuna Launcher")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 팀 내부용 도구라 단순하게. 필요하면 특정 도메인으로 좁힐 것.
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.exception("%s %s error %.1fms", request.method, request.url.path, elapsed_ms)
+        raise
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    logger.info("%s %s %s %.1fms", request.method, request.url.path, response.status_code, elapsed_ms)
+    return response
 
 # ---- 실행 상태 관리 (메모리에 보관 - 서버 재시작하면 초기화됨, 진행 중이던 것도 새로 세야 함) ----
 _lock = threading.Lock()
 RUNS = {}       # run_id -> {user_email, study_name, n_trials, process, status, queued_at, started_at}
 QUEUE = []      # 대기 중인 run_id 리스트 (순서대로 처리)
+
+
+def _cleanup_run_logs(keep: int = 50):
+    try:
+        paths = [
+            os.path.join(LOGS_DIR, name)
+            for name in os.listdir(LOGS_DIR)
+            if name.startswith("run_") and name.endswith(".log")
+        ]
+        paths.sort(key=os.path.getmtime, reverse=True)
+        for path in paths[keep:]:
+            try:
+                os.remove(path)
+                logger.info("removed old run log %s", os.path.basename(path))
+            except OSError:
+                logger.warning("could not remove old run log %s", path)
+    except OSError:
+        logger.exception("run log cleanup failed")
+
+
+_cleanup_run_logs()
 
 
 def verify_user(authorization: str | None):
@@ -80,16 +115,25 @@ def _try_start_next():
     while QUEUE and _active_count() < MAX_CONCURRENT:
         run_id = QUEUE.pop(0)
         run = RUNS[run_id]
-        proc = subprocess.Popen(
-            [sys.executable, STUDY_RUNNER, run["study_name"], str(run["n_trials"]),
-             run["user_id"], run["access_token"]],
-            cwd=PROJECT_ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        log_path = os.path.join(LOGS_DIR, f"run_{run_id}.log")
+        logger.info("starting run_id=%s study=%s n_trials=%s", run_id, run["study_name"], run["n_trials"])
+        with open(log_path, "a", encoding="utf-8", buffering=1) as log_file:
+            log_file.write(
+                f"{datetime.now(timezone.utc).isoformat()} "
+                f"starting study={run['study_name']} n_trials={run['n_trials']}\n"
+            )
+            proc = subprocess.Popen(
+                [sys.executable, STUDY_RUNNER, run["study_name"], str(run["n_trials"]),
+                 run["user_id"], run["access_token"]],
+                cwd=PROJECT_ROOT,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+            )
         run["process"] = proc
+        run["log_path"] = log_path
         run["status"] = "running"
         run["started_at"] = datetime.now(timezone.utc).isoformat()
+        logger.info("run_id=%s process started pid=%s log=%s", run_id, proc.pid, os.path.basename(log_path))
 
 
 def _watcher_loop():
@@ -99,6 +143,11 @@ def _watcher_loop():
         with _lock:
             for run in RUNS.values():
                 if run["status"] == "running" and run["process"].poll() is not None:
+                    returncode = run["process"].returncode
+                    if returncode == 0:
+                        logger.info("run finished run_id=%s returncode=0", run.get("run_id", "?"))
+                    else:
+                        logger.error("run finished run_id=%s returncode=%s", run.get("run_id", "?"), returncode)
                     run["status"] = "finished_process"  # 아래 /api/runs 조회 시 결과 파일 보고 done/error로 확정
             _try_start_next()
 
@@ -216,8 +265,11 @@ def create_run(payload: dict, authorization: str | None = Header(default=None)):
             "status": "queued",
             "queued_at": datetime.now(timezone.utc).isoformat(),
             "started_at": None,
+            "run_id": run_id,
+            "log_path": None,
         }
         QUEUE.append(run_id)
+        logger.info("queued run_id=%s user_id=%s nickname=%s n_trials=%s", run_id, user.get("id"), nickname, n_trials)
         _try_start_next()
 
     return {"run_id": run_id, "study_name": study_name}

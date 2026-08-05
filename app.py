@@ -132,6 +132,13 @@ if "sim_running" not in st.session_state:
 # 쪽이 이미 훨씬 상세하게 담당하고 있고, 여기는 사용자에게 보여줄 요약본.
 RELEASE_NOTES = [
     {
+        "version": "1.0.9",
+        "date": "2026-08-05",
+        "title": "비로그인 화면 정리",
+        "details": "- 로그인 전에는 본문 로그인 화면만 표시되도록 정리\n"
+                    "- Optuna 웹 런처 HTML 전환 Phase 1과 화면 흐름을 맞춤",
+    },
+    {
         "version": "1.0.8",
         "date": "2026-08-03",
         "title": "차량 제원 설정에 '시뮬레이션 설정' 탭 추가",
@@ -276,6 +283,42 @@ def tutorial_dialog():
         except Exception:
             pass
         st.rerun()
+
+
+def render_login_gate():
+    st.info("시뮬레이션을 실행하려면 로그인해주세요.")
+    gate_login, gate_signup = st.tabs(["로그인", "회원가입"])
+
+    with gate_login:
+        login_email = st.text_input("이메일", key="gate_login_email")
+        login_pw = st.text_input("비밀번호", type="password", key="gate_login_pw")
+        if st.button("로그인", key="gate_login_btn", type="primary", use_container_width=True):
+            try:
+                res = supabase.auth.sign_in_with_password({"email": login_email, "password": login_pw})
+                st.session_state.user = res.user
+                session_storage(save_token=res.session.refresh_token, key="session_storage_writer")
+                st.rerun()
+            except Exception as e:
+                st.error(f"로그인 실패: {e}")
+
+    with gate_signup:
+        signup_nickname = st.text_input("닉네임", key="gate_signup_nickname")
+        signup_email = st.text_input("이메일", key="gate_signup_email")
+        signup_pw = st.text_input("비밀번호", type="password", key="gate_signup_pw")
+        if st.button("회원가입", key="gate_signup_btn", use_container_width=True):
+            if not signup_nickname.strip():
+                st.error("닉네임을 입력해주세요.")
+            else:
+                try:
+                    supabase.auth.sign_up({
+                        "email": signup_email,
+                        "password": signup_pw,
+                        "options": {"data": {"nickname": signup_nickname.strip()}},
+                    })
+                    st.success("가입 완료. 이메일 인증 후 로그인해주세요.")
+                except Exception as e:
+                    st.error(f"가입 실패: {e}")
+
 
 # 차량 제원 팝업 (제목 옆 버튼에서 호출하므로 먼저 정의)
 # 아래에서 읽고 쓰는 physics/solar/cell/pack/power/drive/race는 전부
@@ -475,6 +518,10 @@ with version_col:
     # 버튼 하나의 라벨로 합쳐 한 줄로 안정적으로 표시되게 함.
     if st.button(f"v{APP_VERSION} (Release note)"):
         release_notes_dialog()
+
+if st.session_state.user is None:
+    render_login_gate()
+    st.stop()
 
 # 캐시
 @st.cache_data
