@@ -121,7 +121,7 @@
     <h1>여기까지 온 길</h1>
     <p class="standfirst">
       무엇을 고민했고, 무엇을 골랐고, 왜 그렇게 정했는지. 그리고 그게
-      호주에서 실제로 어떻게 쓰일지까지 한 장에 정리했다.
+      호주로 무엇이 나가는지까지 한 장에 정리했다. (2026-08-06 방향 재정립 반영)
     </p>
     <div class="legend">
       <span><span class="sw done"></span>완료</span>
@@ -146,7 +146,7 @@
           <div class="step"><div class="k">제어</div><div class="v">규칙기반 MPC (LV1~LV8)</div></div>
           <div class="step"><div class="k">정련</div><div class="v">계단형 → 연속(ramp) 전환</div></div>
           <div class="step wip"><div class="k">진행</div><div class="v">코스팅 · 내리막 캡</div></div>
-          <div class="step todo"><div class="k">예정</div><div class="v">비용함수 MPC (DP)</div></div>
+          <div class="step todo"><div class="k">예정</div><div class="v">열 모델 + 비용함수 MPC (DP)</div></div>
         </div>
       </div>
 
@@ -178,7 +178,7 @@
           <div class="step"><div class="k">검증</div><div class="v">로그 41,397행 대조</div></div>
           <div class="step"><div class="k">Phase 1</div><div class="v">파일 업로드 · 저장 · 차트</div></div>
           <div class="step wip"><div class="k">진행</div><div class="v">주기 정책 · 로컬 우선 전환</div></div>
-          <div class="step todo"><div class="k">예정</div><div class="v">Phase 2 실시간 수신</div></div>
+          <div class="step todo" style="opacity:.55"><div class="k">취소</div><div class="v"><s>Phase 2 실시간 수신</s><br>팀원 시스템이 담당</div></div>
         </div>
       </div>
 
@@ -298,11 +298,10 @@
         <div class="axis-key"><div class="n">순서</div><div class="t">한국에서</div></div>
         <div class="steps">
           <div class="step wip"><div class="k">1</div><div class="v">코스팅·제동 물리 완성</div></div>
-          <div class="step todo"><div class="k">2</div><div class="v">DP 가치함수로 비용함수 전환</div></div>
-          <div class="step todo"><div class="k">3</div><div class="v">예보 ≠ 실제 분리</div></div>
-          <div class="step todo"><div class="k">4</div><div class="v">실측으로 상수 보정</div></div>
-          <div class="step todo"><div class="k">5</div><div class="v">(선택) RL 비교</div></div>
-        </div>
+          <div class="step todo"><div class="k">2</div><div class="v">열 모델 추가 (신규)</div></div>
+          <div class="step todo"><div class="k">3</div><div class="v">DP 가치함수 → 표 생성</div></div>
+          <div class="step todo"><div class="k">4</div><div class="v">시험주행 로그로 계수 보정</div></div>
+          <div class="step todo"><div class="k">5</div><div class="v">(선택) 예보오차 · 잔차학습</div></div>
       </div>
     </div>
 
@@ -335,28 +334,29 @@
         </ul>
       </div>
 
-      <div class="arrowcol">모델 탑재 →</div>
+      <div class="arrowcol">표 파일 →</div>
 
       <div class="place">
         <h4>호주</h4>
-        <div class="sub">체이스카 노트북 · 오프라인</div>
+        <div class="sub">팀원 노트북 · 오프라인</div>
         <ul>
-          <li><b>무선으로 CAN 데이터 수신</b> — 차량에서 직접</li>
-          <li><b>로컬 저장</b> — 원본 전량, 인터넷 불필요</li>
-          <li><b>실시간 모델 구동</b> — MPC가 매 스텝 재계산</li>
-          <li><b>대시보드에 표시</b> — <code>feature/ocs</code>의 화면 활용</li>
-          <li>운전자에게: <b>권장 속도</b></li>
+          <li><b>CAN 수신 · 대시보드</b> — 팀원의 기존 시스템이 담당</li>
+          <li><b>우리가 보내는 것: 표 파일 하나</b></li>
+          <li>표를 읽어 현재 상태에 맞는 <b>권장 속도</b> 표시</li>
+          <li>파이썬도, 죽을 프로세스도 없음 — <b>고장날 여지 최소</b></li>
+          <li>(선택) 컨트롤스탑에서 상태 전송 → 한국이 재계산</li>
         </ul>
       </div>
     </div>
 
     <div class="note">
-      <p><b>왜 오프라인이 전제인가</b> — 3,038km 중 상당 구간이 통신 음영이다.
-      서버에 의존하면 <b>실시간 판단이 가장 필요한 순간에 멈춘다.</b> 그래서 노트북이
-      혼자서도 완결되게 만들고, 인터넷이 잡힐 때만 요약을 서버로 올린다.</p>
-      <p><b>계산 부담은 없다</b> — MPC 한 스텝이 약 66마이크로초다. 실시간은 1초에 한 번이면
-      충분하니 여유가 만 배 이상이다. 예측 모델도 1MB 미만이라 노트북에 부담을 주지 않는다.</p>
-    </div>
+      <p><b>왜 표 하나인가</b> — 현장에 만든 사람이 없다. 그러면 <b>고장날 여지가
+      가장 적은 형태</b>가 최우선 기준이 된다. DP로 풀면 결과물이 애초에 표라,
+      "DP로 간다"는 결정이 인계 형태까지 자동으로 해결한다.</p>
+      <p><b>표는 정적이 아니다</b> — 축이 상태(거리·SOC·온도·시간여유)이므로,
+      날씨가 계획보다 나쁘면 SOC가 낮아지고 표가 다른 속도를 내놓는다.
+      <b>매 순간 "어떤 선택지를 취할까"에 답하는 정책</b>이다.</p>
+      </div>
   </section>
 
   <footer>
