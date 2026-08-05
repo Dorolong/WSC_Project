@@ -3,354 +3,86 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>WSC Optuna 런처</title>
-<style>
-  :root {
-    --primary: #2F6F4E;
-    --primary-dark: #1F4D36;
-    --mint: #E3F0E8;
-    --paper: #F6F7F2;
-    --card: #FFFFFF;
-    --line: #E3E1D8;
-    --ink: #23252B;
-    --ink-soft: #6B6C72;
-    --ok: #2F6F4E;
-    --warn: #B8860B;
-    --busy: #B23A2E;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--paper);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    color: var(--ink);
-    min-height: 100vh;
-  }
-  .wrap { max-width: 480px; margin: 0 auto; padding: 24px 18px 60px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--ink-soft); font-size: 13px; margin: 0 0 22px; }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 16px 18px;
-    margin-bottom: 16px;
-  }
-  label { display: block; font-size: 12.5px; color: var(--ink-soft); margin-bottom: 6px; }
-  input[type=email], input[type=password], input[type=number] {
-    width: 100%;
-    font-size: 15px;
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    margin-bottom: 12px;
-  }
-  .btn {
-    width: 100%;
-    padding: 11px;
-    border-radius: 8px;
-    border: none;
-    font-size: 14.5px;
-    font-weight: 700;
-    cursor: pointer;
-    background: var(--primary);
-    color: #fff;
-  }
-  .btn.ghost { background: var(--mint); color: var(--primary-dark); margin-top: 8px; }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .status-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  .status-pill {
-    font-size: 12.5px;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: 999px;
-  }
-  .status-pill.ok { background: #E7F1EA; color: var(--ok); }
-  .status-pill.warn { background: #FBF3DB; color: var(--warn); }
-  .status-pill.busy { background: #FBEAE7; color: var(--busy); }
-  .bar-track { height: 8px; border-radius: 999px; background: var(--mint); overflow: hidden; }
-  .bar-fill { height: 100%; background: var(--primary); transition: width 0.4s; }
-  .bar-fill.busy { background: var(--busy); }
-  .bar-fill.warn { background: var(--warn); }
-  .hint { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
-  .err { color: var(--busy); font-size: 13px; margin-top: 8px; min-height: 16px; }
-  .result-box { font-size: 13px; line-height: 1.6; }
-  .result-box .kv { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dashed var(--line); }
-  #app { display: none; }
-</style>
+<title>WSC Optuna Queue</title>
+<link rel="stylesheet" href="./css/tokens.css" />
+<link rel="stylesheet" href="./css/app.css" />
 </head>
 <body>
-<div class="wrap">
-  <h1>🏎️ WSC Optuna 런처</h1>
-  <p class="sub">각자 독립된 Optuna 탐색을 서버에서 돌려볼 수 있어요.</p>
-  <p class="sub" style="margin-top:-14px;">
-    <a href="https://wscproject-dmiusnw9kapxecz8irxpgw.streamlit.app/" target="_blank" rel="noopener">🚗 시뮬레이터로</a>
-    &nbsp;·&nbsp;
-    <a href="https://github.com/Dorolong/WSC_Project" target="_blank" rel="noopener">💻 코드 보기</a>
-  </p>
-
-  <div id="gate" class="card">
-    <label for="email">이메일</label>
-    <input type="email" id="email" autocomplete="email" />
-    <label for="password">비밀번호</label>
-    <input type="password" id="password" autocomplete="current-password" />
-    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-soft); margin-bottom:12px;">
-      <input type="checkbox" id="rememberEmail" style="width:auto;" />아이디 저장
-    </label>
-    <button class="btn" id="loginBtn">로그인</button>
-    <p class="err" id="gateErr"></p>
-  </div>
-
-  <div id="app">
-    <div class="status-row" style="margin-bottom:10px;">
-      <span style="font-size:12.5px; color:var(--ink-soft);" id="loggedInAs"></span>
-      <button id="logoutBtn" style="background:none; border:none; color:var(--ink-soft); font-size:12.5px; text-decoration:underline; cursor:pointer; padding:0;">로그아웃</button>
+<div class="app-shell">
+  <header class="topbar">
+    <div>
+      <h1>WSC Optuna Queue</h1>
+      <p class="sub">Run personal Optuna searches on the shared WSC server.</p>
     </div>
-    <div class="card">
-      <div class="status-row">
-        <strong style="font-size:14px;">서버 현황</strong>
-        <span class="status-pill" id="statusPill">-</span>
+    <nav class="top-links" aria-label="External links">
+      <a href="https://wscproject-dmiusnw9kapxecz8irxpgw.streamlit.app/" target="_blank" rel="noopener">Streamlit App</a>
+      <a href="https://github.com/Dorolong/WSC_Project" target="_blank" rel="noopener">Repository</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="gate" class="auth-panel">
+      <div class="panel-head">
+        <h2>Sign in</h2>
       </div>
-      <div class="bar-track"><div class="bar-fill" id="statusBar" style="width:0%;"></div></div>
-      <p class="hint" id="statusText">불러오는 중...</p>
-      <div id="runningList" style="margin-top:6px;"></div>
-    </div>
-
-    <div class="card">
-      <label for="nTrials">Trial 수</label>
-      <input type="number" id="nTrials" value="20" min="1" max="100" />
-      <button class="btn" id="runBtn">탐색 시작</button>
-      <p class="err" id="runErr"></p>
-    </div>
-
-    <div class="card" id="myRunCard" style="display:none;">
-      <div class="status-row">
-        <strong style="font-size:14px;">내 탐색 진행 상황</strong>
-        <span id="myRunStatus" style="font-size:12.5px; color:var(--ink-soft);"></span>
+      <div class="form-grid">
+        <label for="email">Email</label>
+        <input type="email" id="email" autocomplete="email" />
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" />
+        <label class="check-row">
+          <input type="checkbox" id="rememberEmail" />
+          <span>Remember email</span>
+        </label>
+        <button class="btn" id="loginBtn">Sign in</button>
+        <p class="err" id="gateErr"></p>
       </div>
-      <div class="bar-track"><div class="bar-fill" id="myRunBar" style="width:0%;"></div></div>
-      <p class="hint" id="myRunText"></p>
-      <div id="myRunResult" class="result-box" style="display:none; margin-top:10px;"></div>
-    </div>
-  </div>
+    </section>
+
+    <section id="app" class="workspace" hidden>
+      <div class="account-row">
+        <span id="loggedInAs"></span>
+        <button id="logoutBtn" class="link-button">Sign out</button>
+      </div>
+
+      <div class="view-tabs" role="tablist" aria-label="Views">
+        <button class="tab is-active" id="tabOptuna" type="button">Optuna Search</button>
+      </div>
+
+      <section class="dashboard-grid" id="optunaView">
+        <article class="card server-card">
+          <div class="status-row">
+            <strong>Server Status</strong>
+            <span class="status-pill" id="statusPill">-</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" id="statusBar"></div></div>
+          <p class="hint" id="statusText">Loading...</p>
+          <div id="runningList" class="list-block"></div>
+        </article>
+
+        <article class="card run-card">
+          <label for="nTrials">Trials</label>
+          <div class="run-controls">
+            <input type="number" id="nTrials" value="20" min="1" max="100" />
+            <button class="btn" id="runBtn">Start Search</button>
+          </div>
+          <p class="err" id="runErr"></p>
+        </article>
+
+        <article class="card progress-card" id="myRunCard" hidden>
+          <div class="status-row">
+            <strong>My Search</strong>
+            <span id="myRunStatus" class="soft-text"></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" id="myRunBar"></div></div>
+          <p class="hint" id="myRunText"></p>
+          <div id="myRunResult" class="result-box" hidden></div>
+        </article>
+      </section>
+    </section>
+  </main>
 </div>
 
-<script type="module">
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from './sync-config.js';
-
-let supabaseClient = null;
-async function getClient() {
-  if (supabaseClient) return supabaseClient;
-  const mod = await import('https://esm.sh/@supabase/supabase-js@2');
-  supabaseClient = mod.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return supabaseClient;
-}
-
-let accessToken = null;
-let userEmail = null;
-let myRunId = null;
-let myRunTimer = null;
-const SAVED_EMAIL_KEY = 'wscOptunaSavedEmail';
-
-function apiHeaders() {
-  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` };
-}
-
-async function tryAutoLogin() {
-  const saved = localStorage.getItem(SAVED_EMAIL_KEY);
-  if (saved) {
-    document.getElementById('email').value = saved;
-    document.getElementById('rememberEmail').checked = true;
-  }
-  const client = await getClient();
-  const { data } = await client.auth.getSession();
-  if (data.session) {
-    accessToken = data.session.access_token;
-    userEmail = data.session.user.email;
-    showApp();
-  }
-}
-
-function showApp() {
-  document.getElementById('gate').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  document.getElementById('loggedInAs').textContent = userEmail ? `${userEmail}로 로그인됨` : '';
-  refreshStatus();
-  setInterval(refreshStatus, 4000);
-  resumeMyRun();
-}
-
-async function resumeMyRun() {
-  try {
-    const res = await fetch('/api/my-active-run', { headers: apiHeaders() });
-    const data = await res.json();
-    if (!data.run_id) return;
-    myRunId = data.run_id;
-    document.getElementById('myRunCard').style.display = 'block';
-    pollMyRun();
-    if (myRunTimer) clearInterval(myRunTimer);
-    myRunTimer = setInterval(pollMyRun, 3000);
-  } catch (e) {
-    // 실패해도 조용히 무시 - 새로 "탐색 시작" 누르면 되니 화면을 막을 정도는 아님
-  }
-}
-
-document.getElementById('loginBtn').addEventListener('click', async () => {
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
-  const remember = document.getElementById('rememberEmail').checked;
-  const errEl = document.getElementById('gateErr');
-  errEl.textContent = '';
-  if (!email || !password) { errEl.textContent = '이메일과 비밀번호를 입력해주세요.'; return; }
-  try {
-    const client = await getClient();
-    const { data, error } = await client.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    accessToken = data.session.access_token;
-    userEmail = data.session.user.email;
-    if (remember) localStorage.setItem(SAVED_EMAIL_KEY, email);
-    else localStorage.removeItem(SAVED_EMAIL_KEY);
-    showApp();
-  } catch (e) {
-    errEl.textContent = e.message || '로그인에 실패했어요.';
-  }
-});
-
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  const client = await getClient();
-  await client.auth.signOut();
-  accessToken = null;
-  userEmail = null;
-  myRunId = null;
-  if (myRunTimer) clearInterval(myRunTimer);
-  document.getElementById('myRunCard').style.display = 'none';
-  document.getElementById('password').value = '';
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('gate').style.display = 'block';
-});
-
-async function refreshStatus() {
-  try {
-    const res = await fetch('/api/status');
-    const data = await res.json();
-    const pill = document.getElementById('statusPill');
-    const bar = document.getElementById('statusBar');
-    const text = document.getElementById('statusText');
-
-    pill.textContent = `${data.level} ${data.occupancy_pct}%`;
-    pill.className = 'status-pill ' + (data.occupancy_pct < 50 ? 'ok' : data.occupancy_pct < 75 ? 'warn' : 'busy');
-    bar.style.width = `${data.occupancy_pct}%`;
-    bar.className = 'bar-fill ' + (data.occupancy_pct < 50 ? '' : data.occupancy_pct < 75 ? 'warn' : 'busy');
-    text.textContent = `실행 중 ${data.active}/${data.max_concurrent}명` + (data.queued > 0 ? ` · 대기 ${data.queued}명` : '');
-
-    const runningEl = document.getElementById('runningList');
-    const lines = [];
-    (data.running || []).forEach(r => {
-      lines.push(`실행중: ${r.nickname}`);
-    });
-    (data.queue || []).forEach((q, i) => {
-      lines.push(`대기 ${i + 1}) ${q.nickname}`);
-    });
-    runningEl.innerHTML = lines.map(l => `<p class="hint" style="margin-top:4px;">${l}</p>`).join('');
-  } catch (e) {
-    // 상태 조회 실패는 조용히 무시 (다음 폴링에서 재시도)
-  }
-}
-
-document.getElementById('runBtn').addEventListener('click', async () => {
-  const nTrials = parseInt(document.getElementById('nTrials').value, 10);
-  const errEl = document.getElementById('runErr');
-  const btn = document.getElementById('runBtn');
-  errEl.textContent = '';
-  btn.disabled = true;
-  try {
-    const res = await fetch('/api/runs', {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify({ n_trials: nTrials }),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || '실행 요청에 실패했어요.');
-    }
-    const data = await res.json();
-    myRunId = data.run_id;
-    document.getElementById('myRunCard').style.display = 'block';
-    document.getElementById('myRunResult').style.display = 'none';
-    pollMyRun();
-    if (myRunTimer) clearInterval(myRunTimer);
-    myRunTimer = setInterval(pollMyRun, 3000);
-  } catch (e) {
-    errEl.textContent = e.message;
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-function formatSeconds(sec) {
-  if (sec === null || sec === undefined) return '';
-  if (sec < 60) return '1분 이내';
-  const mins = Math.round(sec / 60);
-  if (mins < 60) return `약 ${mins}분`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return `약 ${hrs}시간 ${rem}분`;
-}
-
-async function pollMyRun() {
-  if (!myRunId) return;
-  try {
-    const res = await fetch(`/api/runs/${myRunId}`, { headers: apiHeaders() });
-    const data = await res.json();
-    const statusEl = document.getElementById('myRunStatus');
-    const bar = document.getElementById('myRunBar');
-    const text = document.getElementById('myRunText');
-
-    if (data.status === 'queued') {
-      statusEl.textContent = '대기 중';
-      bar.style.width = '0%';
-      const waitStr = formatSeconds(data.estimated_wait_seconds);
-      text.textContent = `대기열 ${data.position}번째` + (waitStr ? ` · 예상 대기 ${waitStr}` : '');
-    } else if (data.status === 'running') {
-      statusEl.textContent = '실행 중';
-      const pct = data.progress_pct ?? 0;
-      bar.style.width = `${pct}%`;
-      const remainStr = formatSeconds(data.estimated_remaining_seconds);
-      text.textContent = `Trial ${data.trial_current ?? 0} / ${data.n_trials} (${pct}%)` + (remainStr ? ` · 남은 시간 ${remainStr}` : '');
-    } else if (data.status === 'finalizing') {
-      statusEl.textContent = '마무리 중';
-      text.textContent = '결과 정리하는 중이에요, 잠시만요...';
-    } else if (data.status === 'done') {
-      statusEl.textContent = '완료';
-      bar.style.width = '100%';
-      text.textContent = '탐색이 끝났어요.';
-      showResult(data.result);
-      clearInterval(myRunTimer);
-    } else if (data.status === 'error') {
-      statusEl.textContent = '오류';
-      text.textContent = data.result?.error || '탐색 중 문제가 발생했어요.';
-      clearInterval(myRunTimer);
-    }
-  } catch (e) {
-    // 폴링 실패는 조용히 재시도
-  }
-}
-
-function showResult(result) {
-  const box = document.getElementById('myRunResult');
-  box.style.display = 'block';
-  const paramsHtml = Object.entries(result.best_params || {})
-    .map(([k, v]) => `<div class="kv"><span>${k}</span><span>${typeof v === 'number' ? v.toFixed(3) : v}</span></div>`)
-    .join('');
-  box.innerHTML = `
-    <div class="kv"><span>Best Value</span><span>${Number(result.best_value).toFixed(3)}</span></div>
-    <div class="kv"><span>종료 사유</span><span>${result.termination_reason ?? '-'}</span></div>
-    <div style="margin-top:8px; font-weight:700; font-size:12.5px;">Best Params</div>
-    ${paramsHtml}
-  `;
-}
-
-tryAutoLogin();
-</script>
+<script type="module" src="./js/nav.js"></script>
 </body>
 </html>

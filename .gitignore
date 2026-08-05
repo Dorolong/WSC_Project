@@ -20,3 +20,4 @@ outputs/optuna_study.db-shm
 outputs/optuna_study.db-wal
 outputs/trial_*/
 outputs/terrain_*.png
+outputs/logs/
