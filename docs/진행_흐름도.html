@@ -1,0 +1,369 @@
+<title>WSC 프로젝트 진행 흐름도</title>
+<style>
+  :root {
+    --ink:#16211C; --ink-soft:#4A5A52; --ink-faint:#6B7A72;
+    --ground:#FBFAF7; --surface:#FFFFFF; --rule:#DFE3DC;
+    --green:#2F6F4E; --green-soft:#E8F0EA;
+    --amber:#B8621B; --amber-soft:#FBEFE2;
+    --slate:#3E5266; --slate-soft:#E9EDF1;
+    --dim:#96A29B;
+    --shadow:0 1px 2px rgba(22,33,28,.06), 0 6px 20px rgba(22,33,28,.05);
+    --sans:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",ui-sans-serif,system-ui,sans-serif;
+    --mono:ui-monospace,"SFMono-Regular","Cascadia Mono",Consolas,"D2Coding",monospace;
+    --s--1:.8125rem; --s0:.9375rem; --s1:1.125rem; --s2:1.4375rem; --s3:1.9375rem; --s4:2.625rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink:#E7EDE9; --ink-soft:#A8B5AE; --ink-faint:#7E8C85;
+      --ground:#10160F; --surface:#18211B; --rule:#2C3830;
+      --green:#6FBF8F; --green-soft:#1D3227;
+      --amber:#E09A54; --amber-soft:#33240F;
+      --slate:#9FB4C8; --slate-soft:#1E2A33; --dim:#5D6B64;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{--ink:#E7EDE9;--ink-soft:#A8B5AE;--ink-faint:#7E8C85;--ground:#10160F;--surface:#18211B;--rule:#2C3830;--green:#6FBF8F;--green-soft:#1D3227;--amber:#E09A54;--amber-soft:#33240F;--slate:#9FB4C8;--slate-soft:#1E2A33;--dim:#5D6B64;--shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.3);}
+  :root[data-theme="light"]{--ink:#16211C;--ink-soft:#4A5A52;--ink-faint:#6B7A72;--ground:#FBFAF7;--surface:#FFFFFF;--rule:#DFE3DC;--green:#2F6F4E;--green-soft:#E8F0EA;--amber:#B8621B;--amber-soft:#FBEFE2;--slate:#3E5266;--slate-soft:#E9EDF1;--dim:#96A29B;--shadow:0 1px 2px rgba(22,33,28,.06),0 6px 20px rgba(22,33,28,.05);}
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);
+       font-size:var(--s0);line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto;padding:3.5rem 1.5rem 6rem}
+
+  .eyebrow{font-family:var(--mono);font-size:var(--s--1);letter-spacing:.1em;
+           text-transform:uppercase;color:var(--green);font-weight:600}
+  h1{font-size:var(--s4);line-height:1.1;margin:.5rem 0 0;letter-spacing:-.02em;font-weight:700;text-wrap:balance}
+  .standfirst{font-size:var(--s1);color:var(--ink-soft);max-width:64ch;margin:.875rem 0 0}
+
+  section{margin-top:4rem}
+  .sec-head{display:flex;align-items:baseline;gap:.875rem;margin-bottom:.35rem}
+  .sec-num{font-family:var(--mono);font-size:var(--s--1);font-weight:600;color:var(--green);letter-spacing:.06em}
+  h2{font-size:var(--s2);margin:0;letter-spacing:-.015em;font-weight:700;text-wrap:balance}
+  .lede{color:var(--ink-soft);max-width:70ch;margin:0 0 1.5rem}
+  h3.sub{font-size:var(--s1);margin:2rem 0 .75rem;font-weight:700;letter-spacing:-.01em}
+
+  /* ── 축 타임라인 ── */
+  .axes{display:grid;gap:.5rem}
+  .axis{display:grid;grid-template-columns:8.5rem 1fr;gap:1rem;align-items:start}
+  .axis-key{text-align:right;padding-top:.9rem}
+  .axis-key .n{font-family:var(--mono);font-size:var(--s--1);color:var(--ink-faint);letter-spacing:.05em}
+  .axis-key .t{font-weight:700;font-size:var(--s0);line-height:1.3;margin-top:.1rem}
+  .steps{display:flex;gap:.4rem;flex-wrap:wrap;background:var(--surface);border:1px solid var(--rule);
+         border-radius:3px;padding:.75rem;box-shadow:var(--shadow)}
+  .step{flex:1 1 130px;min-width:0;padding:.5rem .625rem;border-radius:2px;background:var(--green-soft);
+        border-left:3px solid var(--green)}
+  .step.wip{background:var(--amber-soft);border-left-color:var(--amber)}
+  .step.todo{background:transparent;border:1px dashed var(--rule);border-left:3px dashed var(--dim)}
+  .step .k{font-family:var(--mono);font-size:.6875rem;letter-spacing:.06em;color:var(--ink-faint)}
+  .step .v{font-weight:600;font-size:var(--s--1);line-height:1.35;margin-top:.1rem}
+
+  /* ── 결정 카드 ── */
+  .decisions{display:grid;gap:.75rem}
+  .dec{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+       box-shadow:var(--shadow);overflow:hidden}
+  .dec-q{padding:.75rem 1rem;background:var(--slate-soft);font-weight:700;font-size:var(--s0);
+         display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+  .dec-q .tag{font-family:var(--mono);font-size:.6875rem;letter-spacing:.05em;color:var(--slate);font-weight:600}
+  .dec-body{padding:.875rem 1rem;display:grid;gap:.5rem}
+  .opt{display:grid;grid-template-columns:1.5rem 1fr;gap:.5rem;align-items:start;font-size:var(--s--1);line-height:1.55}
+  .opt .mk{font-weight:700;text-align:center}
+  .opt.no{color:var(--ink-faint)}
+  .opt.no .mk{color:var(--dim)}
+  .opt.yes .mk{color:var(--green)}
+  .opt.no .what{text-decoration:line-through;text-decoration-color:var(--dim)}
+  .opt .why{color:var(--ink-faint)}
+  .opt.yes .what{font-weight:700;color:var(--ink)}
+
+  /* ── 버그 표 ── */
+  .tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:3px;background:var(--surface);box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:var(--s--1);min-width:640px}
+  th,td{text-align:left;padding:.6rem .9rem;border-bottom:1px solid var(--rule);vertical-align:top}
+  thead th{font-family:var(--mono);font-size:.6875rem;letter-spacing:.08em;text-transform:uppercase;
+           color:var(--ink-faint);font-weight:600;background:var(--ground)}
+  tbody tr:last-child td{border-bottom:none}
+  td.impact{font-weight:600;color:var(--amber);white-space:nowrap}
+
+  /* ── 배포 흐름 ── */
+  .deploy{display:grid;grid-template-columns:1fr auto 1fr;gap:1.25rem;align-items:stretch}
+  @media (max-width:800px){.deploy{grid-template-columns:1fr}}
+  .place{background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+         box-shadow:var(--shadow);padding:1.125rem 1.25rem}
+  .place h4{margin:0 0 .1rem;font-size:var(--s1);font-weight:700}
+  .place .sub{font-family:var(--mono);font-size:var(--s--1);color:var(--green);letter-spacing:.04em;margin-bottom:.75rem}
+  .place ul{margin:0;padding-left:1.1rem;display:grid;gap:.4rem}
+  .place li{font-size:var(--s--1);line-height:1.5;color:var(--ink-soft)}
+  .place li b{color:var(--ink)}
+  .arrowcol{display:flex;align-items:center;justify-content:center;color:var(--ink-faint);
+            font-family:var(--mono);font-size:var(--s--1);writing-mode:horizontal-tb}
+  @media (max-width:800px){.arrowcol{transform:rotate(90deg);padding:.5rem 0}}
+
+  .note{border-left:3px solid var(--amber);background:var(--amber-soft);padding:.875rem 1.125rem;
+        border-radius:0 3px 3px 0;margin-top:1.25rem;font-size:var(--s--1);line-height:1.6}
+  .note b{color:var(--amber)}
+  .note p{margin:0}.note p+p{margin-top:.5rem}
+
+  .legend{display:flex;flex-wrap:wrap;gap:.5rem 1.5rem;margin:1rem 0 0;font-size:var(--s--1);color:var(--ink-soft)}
+  .legend span{display:inline-flex;align-items:center;gap:.45rem}
+  .sw{width:.9rem;height:.9rem;border-radius:2px;flex:none}
+  .sw.done{background:var(--green-soft);border-left:3px solid var(--green)}
+  .sw.wip{background:var(--amber-soft);border-left:3px solid var(--amber)}
+  .sw.todo{border:1px dashed var(--dim)}
+
+  footer{margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--rule);
+         font-size:var(--s--1);color:var(--ink-faint)}
+  code{font-family:var(--mono);font-size:.95em}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">WSC_DriveEff_Project · 진행 흐름도</div>
+    <h1>여기까지 온 길</h1>
+    <p class="standfirst">
+      무엇을 고민했고, 무엇을 골랐고, 왜 그렇게 정했는지. 그리고 그게
+      호주에서 실제로 어떻게 쓰일지까지 한 장에 정리했다.
+    </p>
+    <div class="legend">
+      <span><span class="sw done"></span>완료</span>
+      <span><span class="sw wip"></span>진행 중</span>
+      <span><span class="sw todo"></span>예정</span>
+    </div>
+  </header>
+
+  <!-- ═══ 1. 네 개의 축 ═══ -->
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>네 개의 축으로 진행됐다</h2></div>
+    <p class="lede">
+      순서대로가 아니라 <b>서로 다른 축이 나란히</b> 자랐다. 아래가 각 축이 지나온 단계다.
+    </p>
+
+    <div class="axes">
+
+      <div class="axis">
+        <div class="axis-key"><div class="n">축 1</div><div class="t">물리 · 제어</div></div>
+        <div class="steps">
+          <div class="step"><div class="k">기반</div><div class="v">주행저항 · SOC · 발전 물리모델</div></div>
+          <div class="step"><div class="k">제어</div><div class="v">규칙기반 MPC (LV1~LV8)</div></div>
+          <div class="step"><div class="k">정련</div><div class="v">계단형 → 연속(ramp) 전환</div></div>
+          <div class="step wip"><div class="k">진행</div><div class="v">코스팅 · 내리막 캡</div></div>
+          <div class="step todo"><div class="k">예정</div><div class="v">비용함수 MPC (DP)</div></div>
+        </div>
+      </div>
+
+      <div class="axis">
+        <div class="axis-key"><div class="n">축 2</div><div class="t">최적화</div></div>
+        <div class="steps">
+          <div class="step"><div class="k">탐색</div><div class="v">Optuna TPE · 12개 파라미터</div></div>
+          <div class="step"><div class="k">로버스트</div><div class="v">날씨 5개 고정 평균</div></div>
+          <div class="step"><div class="k">현실성</div><div class="v">CS 구간 단위 날씨 섭동</div></div>
+          <div class="step"><div class="k">인프라</div><div class="v">탐색 서버 분리 · 대기열</div></div>
+          <div class="step todo"><div class="k">예정</div><div class="v">예보 오차 도입</div></div>
+        </div>
+      </div>
+
+      <div class="axis">
+        <div class="axis-key"><div class="n">축 3</div><div class="t">웹 · 배포</div></div>
+        <div class="steps">
+          <div class="step"><div class="k">1세대</div><div class="v">Streamlit 시뮬레이터</div></div>
+          <div class="step"><div class="k">계정</div><div class="v">Supabase 로그인 · 기록</div></div>
+          <div class="step"><div class="k">전환</div><div class="v">HTML + FastAPI 통합</div></div>
+          <div class="step"><div class="k">실배포</div><div class="v">오라클 · HTTPS · 레이트리밋</div></div>
+        </div>
+      </div>
+
+      <div class="axis">
+        <div class="axis-key"><div class="n">축 4</div><div class="t">텔레메트리</div></div>
+        <div class="steps">
+          <div class="step"><div class="k">차용판단</div><div class="v">디코더만 · 시스템은 버림</div></div>
+          <div class="step"><div class="k">검증</div><div class="v">로그 41,397행 대조</div></div>
+          <div class="step"><div class="k">Phase 1</div><div class="v">파일 업로드 · 저장 · 차트</div></div>
+          <div class="step wip"><div class="k">진행</div><div class="v">주기 정책 · 로컬 우선 전환</div></div>
+          <div class="step todo"><div class="k">예정</div><div class="v">Phase 2 실시간 수신</div></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ 2. 무엇을 고민했나 ═══ -->
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>무엇을 고민했고 왜 그렇게 정했나</h2></div>
+    <p class="lede">
+      기각한 선택지가 고른 것만큼 중요하다. 나중에 "그때 왜 그렇게 했지"로
+      되돌아오지 않으려면 <b>버린 이유</b>가 남아 있어야 한다.
+    </p>
+
+    <div class="decisions">
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">축 3</span>웹을 어디에 어떻게 올릴까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">GitHub Pages 프론트 + Supabase 백엔드</span><br><span class="why">정적 호스팅이라 무거운 Python 연산을 못 돌린다</span></span></div>
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">Streamlit Cloud에서 Optuna 탐색까지</span><br><span class="why">무료 티어 리소스 한계 + 여러 사용자가 한 프로세스를 공유한다</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">시뮬레이터는 웹, 탐색은 별도 서버로 분리</span><br><span class="why">연산 성격이 다르니 배치도 나눈다</span></span></div>
+        </div>
+      </div>
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">축 3</span>Streamlit을 계속 쓸까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">Streamlit 유지</span><br><span class="why">다른 HTML 기반 웹과 합칠 예정인데 합칠 방법이 없다</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">HTML + CSS + JS + FastAPI로 재작성</span><br><span class="why">같은 도메인 아래 경로로 나눌 수 있게 된다. 결과적으로 로컬 실행 길도 열렸다</span></span></div>
+        </div>
+      </div>
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">축 4</span>기존 텔레메트리 시스템을 어떻게 쓸까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">ArrowPoint를 통째로 서버에 올리기</span><br><span class="why">Splunk + TimescaleDB + JVM이 5GB 이상 필요한데 인스턴스가 1GB다</span></span></div>
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">원본의 측정항목 정의 재사용</span><br><span class="why">더미값이었다. 우리 명세가 더 정확하고 우선순위 구분까지 있다</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">값 디코딩 규칙과 UDP 프레이밍만 차용</span><br><span class="why">13년간 실전 검증된 부분만 가져오고 나머지는 우리 스택으로</span></span></div>
+        </div>
+      </div>
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">축 4</span>수신 데이터를 어디에 쌓을까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">서버에 원본 전량 저장</span><br><span class="why">대회 전체 9GB. 무료 500MB는 물론 유료 8GB도 넘는다</span></span></div>
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">샘플링 주기를 더 낮춰서 줄이기</span><br><span class="why">언더샘플링은 없던 피크를 만든다(에일리어싱). 정확도를 버리는 방향</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">노트북 로컬에 원본, 서버엔 집계만</span><br><span class="why">아웃백엔 인터넷이 없다. 로컬 SSD엔 9GB가 부담이 아니다</span></span></div>
+        </div>
+      </div>
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">축 1</span>규칙 기반을 언제 비용함수로 바꿀까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">지금 바로 solver 기반으로 전환</span><br><span class="why">물리 버그와 solver 튜닝 문제가 뒤섞여 디버깅이 불가능해진다</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">물리 building block을 먼저 완성한 뒤 전환</span><br><span class="why">코스팅·제동·내리막 캡은 어느 쪽으로 가든 필요해서 버려지지 않는다</span></span></div>
+        </div>
+      </div>
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">축 1</span>강화학습을 지금 붙일까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">지금 RL 학습 시작</span><br><span class="why">예보=실제인 환경이라 <b>미래를 아는 정책</b>을 배운다. 실전에 안 옮겨간다</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">DP로 가치함수 먼저 → 예보 오차 도입 → 실측 보정 → 그다음 RL</span><br><span class="why">상태가 1차원이라 지금은 DP가 정확하고 빠르다. RL은 상태가 커진 뒤에 값을 한다</span></span></div>
+        </div>
+      </div>
+
+      <div class="dec">
+        <div class="dec-q"><span class="tag">전반</span>설정값을 어떻게 다룰까</div>
+        <div class="dec-body">
+          <div class="opt no"><span class="mk">✕</span><span><span class="what">전역 객체를 잠시 바꿨다가 되돌리기</span><br><span class="why">사용자마다 스레드가 달라 중간에 섞인다. 근본적으로 안전하지 않다</span></span></div>
+          <div class="opt yes"><span class="mk">✓</span><span><span class="what">설정을 인자로 전달 (cfg → const)</span><br><span class="why">한 사람의 설정 변경이 다른 사람 결과를 바꾸지 않는다</span></span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══ 3. 무엇을 배웠나 ═══ -->
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>겪으면서 알게 된 것</h2></div>
+    <p class="lede">
+      설계보다 <b>실제로 터진 것</b>에서 배운 게 많다. 아래는 같은 종류가 반복된 것들이다.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>무엇이 터졌나</th><th>영향</th><th>배운 것</th></tr></thead>
+        <tbody>
+          <tr><td>야간 시간대 날짜가 안 넘어감</td><td class="impact">993 km</td><td>경계 조건은 A/B로 재봐야 드러난다</td></tr>
+          <tr><td>거리 배열이 numpy가 아니라 pandas</td><td class="impact">4.2배 느림</td><td>성능은 추측하지 말고 프로파일러부터</td></tr>
+          <tr><td>설정이 전역이라 사용자끼리 섞임</td><td class="impact">2회 발생</td><td>공유 프로세스에선 전역이 곧 버그</td></tr>
+          <tr><td>미터와 km를 비교 (신호등)</td><td class="impact">조용히 무동작</td><td>단위 불일치는 에러 없이 몇 주를 간다</td></tr>
+          <tr><td>NaN이 표준 JSON에 없는 값</td><td class="impact">배치 전량 손실</td><td>한 건이 500건을 막는다. 실패 본문을 꼭 남길 것</td></tr>
+          <tr><td>DB 권한과 행 잠금을 혼동</td><td class="impact">401</td><td>둘은 다른 장치다. 증상으로 구분된다</td></tr>
+          <tr><td>문서엔 "정리했다", 실제론 없음</td><td class="impact">재구축 불가</td><td>문서를 믿되 코드로 교차 확인</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p><b>가장 값비쌌던 습관</b> — 검증을 못 한 채로 넘어간 작업들. 파이썬이 없는 환경에서
+      작성된 코드가 여러 번 머지됐고, 그때마다 다른 컴퓨터에서 대신 돌려보고서야 문제가 드러났다.
+      텔레메트리 NaN 버그도 그렇게 잡혔다.</p>
+      <p>그래서 <b>검증 스크립트와 샘플 데이터를 저장소에 함께 두는 것</b>을 원칙으로 삼았다.
+      이제 <code>python scripts/verify_can_decode.py</code> 한 줄이면 누구든 재현한다.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 4. 앞으로 ═══ -->
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>남은 길</h2></div>
+    <p class="lede">순서에 이유가 있다. 앞 단계가 뒤 단계의 전제다.</p>
+
+    <div class="axes">
+      <div class="axis">
+        <div class="axis-key"><div class="n">순서</div><div class="t">한국에서</div></div>
+        <div class="steps">
+          <div class="step wip"><div class="k">1</div><div class="v">코스팅·제동 물리 완성</div></div>
+          <div class="step todo"><div class="k">2</div><div class="v">DP 가치함수로 비용함수 전환</div></div>
+          <div class="step todo"><div class="k">3</div><div class="v">예보 ≠ 실제 분리</div></div>
+          <div class="step todo"><div class="k">4</div><div class="v">실측으로 상수 보정</div></div>
+          <div class="step todo"><div class="k">5</div><div class="v">(선택) RL 비교</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <p><b>3번이 왜 필요한가</b> — 지금은 예보와 실제 날씨가 같아서, 매 스텝 다시 계산하는
+      MPC의 장점이 드러나지 않는다. 예보에 오차를 넣어야 비로소 "미래를 모르는 상태에서
+      잘하는 것"을 측정할 수 있고, 그래야 RL도 의미 있는 걸 배운다.</p>
+      <p><b>4번이 왜 앞서는가</b> — 틀린 환경에서 학습하면 틀린 것을 잘하게 될 뿐이다.
+      <code>Regen_eff=0.6</code>, <code>Cd=0.081</code> 같은 값이 아직 카탈로그·이론값이다.</p>
+    </div>
+  </section>
+
+  <!-- ═══ 5. 실전 ═══ -->
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>실전 구성</h2></div>
+    <p class="lede">
+      한국에서 모델을 완성하고, 호주에서는 <b>노트북 한 대로 오프라인 운용</b>한다.
+    </p>
+
+    <div class="deploy">
+      <div class="place">
+        <h4>한국</h4>
+        <div class="sub">개발 · 학습</div>
+        <ul>
+          <li><b>물리 모델 정련</b> — 코스팅·제동·내리막 캡</li>
+          <li><b>비용함수 MPC</b> — DP로 가치함수 산출</li>
+          <li><b>파라미터 탐색</b> — 오라클 서버에서 Optuna</li>
+          <li><b>실측 보정</b> — 시험 주행 로그를 업로드해 상수 교정</li>
+          <li>결과물: <b>학습된 모델 파일 + 확정 파라미터</b></li>
+        </ul>
+      </div>
+
+      <div class="arrowcol">모델 탑재 →</div>
+
+      <div class="place">
+        <h4>호주</h4>
+        <div class="sub">체이스카 노트북 · 오프라인</div>
+        <ul>
+          <li><b>무선으로 CAN 데이터 수신</b> — 차량에서 직접</li>
+          <li><b>로컬 저장</b> — 원본 전량, 인터넷 불필요</li>
+          <li><b>실시간 모델 구동</b> — MPC가 매 스텝 재계산</li>
+          <li><b>대시보드에 표시</b> — <code>feature/ocs</code>의 화면 활용</li>
+          <li>운전자에게: <b>권장 속도</b></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <p><b>왜 오프라인이 전제인가</b> — 3,038km 중 상당 구간이 통신 음영이다.
+      서버에 의존하면 <b>실시간 판단이 가장 필요한 순간에 멈춘다.</b> 그래서 노트북이
+      혼자서도 완결되게 만들고, 인터넷이 잡힐 때만 요약을 서버로 올린다.</p>
+      <p><b>계산 부담은 없다</b> — MPC 한 스텝이 약 66마이크로초다. 실시간은 1초에 한 번이면
+      충분하니 여유가 만 배 이상이다. 예측 모델도 1MB 미만이라 노트북에 부담을 주지 않는다.</p>
+    </div>
+  </section>
+
+  <footer>
+    이 문서는 저장소의 <code>docs/진행_흐름도.html</code>이다.
+    시스템 구조는 <code>docs/구조도.html</code>, 이해 경로는 <code>docs/이해_지도.md</code>,
+    설계 근거 전체는 <code>docs/WSC_DriveEff_총괄기획안.pdf</code>,
+    지금 할 일은 <code>progress/</code>의 가장 큰 번호에 있다.
+  </footer>
+
+</div>
